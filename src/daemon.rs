@@ -2343,7 +2343,11 @@ impl Daemon {
                 // Task is finished, await will complete immediately
                 match task.await {
                     Ok(Ok(text)) => {
-                        tracing::debug!("Chunk {} completed: {:?}", chunk_index, text);
+                        tracing::debug!(
+                            "Chunk {} completed ({} chars)",
+                            chunk_index,
+                            text.chars().count()
+                        );
                         completed.push(ChunkResult { text, chunk_index });
                     }
                     Ok(Err(e)) => {
@@ -2378,7 +2382,11 @@ impl Daemon {
         for (chunk_index, task) in self.eager_chunk_tasks.drain(..) {
             match task.await {
                 Ok(Ok(text)) => {
-                    tracing::debug!("Chunk {} completed (waited): {:?}", chunk_index, text);
+                    tracing::debug!(
+                        "Chunk {} completed after wait ({} chars)",
+                        chunk_index,
+                        text.chars().count()
+                    );
                     results.push(ChunkResult { text, chunk_index });
                 }
                 Ok(Err(e)) => {
@@ -2458,7 +2466,7 @@ impl Daemon {
                     .await
                 {
                     Ok(Ok(text)) => {
-                        tracing::debug!("Tail transcription: {:?}", text);
+                        tracing::debug!("Tail transcription ({} chars)", text.chars().count());
                         chunk_results.push(ChunkResult {
                             text,
                             chunk_index: chunks_sent,
@@ -2476,7 +2484,10 @@ impl Daemon {
 
         // Combine all chunk results
         let combined = eager::combine_chunk_results(chunk_results);
-        tracing::info!("Combined eager transcription: {:?}", combined);
+        tracing::info!(
+            "Combined eager transcription ({} chars)",
+            combined.chars().count()
+        );
 
         if combined.is_empty() {
             None
@@ -2620,12 +2631,15 @@ impl Daemon {
                     tracing::debug!("Transcription was empty");
                     self.reset_to_idle(state).await;
                 } else {
-                    tracing::info!("Transcribed: {:?}", text);
+                    tracing::info!("Transcription completed ({} chars)", text.chars().count());
 
                     // Apply text processing (replacements, punctuation)
                     let processed_text = self.text_processor.process(&text);
                     if processed_text != text {
-                        tracing::debug!("After text processing: {:?}", processed_text);
+                        tracing::debug!(
+                            "After text processing ({} chars)",
+                            processed_text.chars().count()
+                        );
                     }
 
                     // Smart auto-submit: detect "submit" trigger word at end
@@ -2636,8 +2650,8 @@ impl Daemon {
                         .detect_submit(&processed_text, smart_auto_submit_cli);
                     if smart_submit {
                         tracing::debug!(
-                            "Smart auto-submit triggered, stripped text: {:?}",
-                            processed_text
+                            "Smart auto-submit triggered ({} chars)",
+                            processed_text.chars().count()
                         );
                     }
 
@@ -2680,12 +2694,18 @@ impl Daemon {
                                 profile_override.as_ref().unwrap(),
                                 recent_context.is_some()
                             );
-                            tracing::debug!("Post-processing context: {:?}", recent_context);
+                            tracing::debug!(
+                                "Post-processing context available: {}",
+                                recent_context.is_some()
+                            );
                             let result = profile_processor
                                 .process_with_context(&processed_text, recent_context.as_deref())
                                 .await;
                             tracing::info!("Post-processed: changed: {}", result != processed_text);
-                            tracing::debug!("Post-processed result: {:?}", result);
+                            tracing::debug!(
+                                "Post-processed result ({} chars)",
+                                result.chars().count()
+                            );
                             result
                         } else {
                             // Profile exists but has no post_process_command, use default
@@ -2695,9 +2715,9 @@ impl Daemon {
                                     recent_context.is_some()
                                 );
                                 tracing::debug!(
-                                    "Post-processing input: {:?}, context: {:?}",
-                                    processed_text,
-                                    recent_context
+                                    "Post-processing input ({} chars), context available: {}",
+                                    processed_text.chars().count(),
+                                    recent_context.is_some()
                                 );
                                 let result = post_processor
                                     .process_with_context(
@@ -2709,7 +2729,10 @@ impl Daemon {
                                     "Post-processed: changed: {}",
                                     result != processed_text
                                 );
-                                tracing::debug!("Post-processed result: {:?}", result);
+                                tracing::debug!(
+                                    "Post-processed result ({} chars)",
+                                    result.chars().count()
+                                );
                                 result
                             } else {
                                 processed_text
@@ -2721,15 +2744,15 @@ impl Daemon {
                             recent_context.is_some()
                         );
                         tracing::debug!(
-                            "Post-processing input: {:?}, context: {:?}",
-                            processed_text,
-                            recent_context
+                            "Post-processing input ({} chars), context available: {}",
+                            processed_text.chars().count(),
+                            recent_context.is_some()
                         );
                         let result = post_processor
                             .process_with_context(&processed_text, recent_context.as_deref())
                             .await;
                         tracing::info!("Post-processed: changed: {}", result != processed_text);
-                        tracing::debug!("Post-processed result: {:?}", result);
+                        tracing::debug!("Post-processed result ({} chars)", result.chars().count());
                         result
                     } else {
                         processed_text
@@ -2740,8 +2763,8 @@ impl Daemon {
 
                     if smart_submit {
                         tracing::debug!(
-                            "Smart auto-submit: final text after post-processing: {:?}",
-                            final_text
+                            "Smart auto-submit: final text after post-processing ({} chars)",
+                            final_text.chars().count()
                         );
                     }
 

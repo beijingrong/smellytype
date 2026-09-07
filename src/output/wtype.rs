@@ -78,7 +78,7 @@ impl WtypeOutput {
         }
 
         debug_args.push("--".to_string());
-        debug_args.push(format!("\"{}\"", text.chars().take(20).collect::<String>()));
+        debug_args.push(format!("<{} chars>", text.chars().count()));
         tracing::debug!("Running: {}", debug_args.join(" "));
 
         let output = cmd

@@ -5,47 +5,13 @@
 //! and variants via XKB environment variables when converting text to key
 //! events.
 //!
-//! ## Fast path: dotoold + dotoolc
+//! SmellyType uses direct `dotool` processes. It deliberately does not discover
+//! the shared `/tmp/dotool-pipe`: an unrelated local account can own its reader.
+//! Text containing control characters is rejected before any output, allowing
+//! the output chain to fall back to a text-safe backend such as the clipboard.
 //!
-//! dotool ships a daemon/client pair specifically for low-latency repeated
-//! typing. When `dotoold` is running and the current output does not need a
-//! per-call XKB hint, smellytype detects its FIFO and routes output() through
-//! `dotoolc` — which simply relays commands to the long-lived daemon. The
-//! ~700ms uinput device setup is paid once at daemon startup, not on every
-//! typed segment. Sub-10ms per call.
-//!
-//! Strongly recommended for streaming backends (Parakeet, Soniox), where
-//! 60+ output() calls land per session — without the daemon, the first
-//! call alone stalls for nearly a second. SmellyType's Arch package
-//! installs `dotoold` as a dependency; setup is out of scope here.
-//!
-//! Keyboard layout (`DOTOOL_XKB_LAYOUT`) applies to **the daemon, not the
-//! client**. For a fixed layout on the fast path, set the env var on dotoold's
-//! startup and leave smellytype's dotool XKB fields unset. `dotoolc` does not
-//! work with variants and cannot receive smellytype's per-call XKB hints, so when
-//! smellytype has an XKB layout or variant hint it bypasses `dotoolc` and invokes
-//! direct `dotool` so dotool uses the requested keymap for text-to-key lookup.
-//!
-//! Important: dotool still sends key events. It does not switch the active
-//! desktop/compositor layout. The user must switch to the layout/variant they
-//! want to type in before dictation.
-//!
-//! ## Fallback path: direct dotool
-//!
-//! When `dotoold` isn't running, smellytype spawns `dotool` directly per
-//! call. This is correct but pays the full uinput init cost (~700ms) on
-//! every typed segment — fine for one-shot batch transcription, painful
-//! for streaming.
-//! This is also the path used when smellytype needs an XKB layout or variant
-//! hint, because direct `dotool` can receive those hints per invocation.
-//!
-//! ## Requirements
-//!
-//! - dotool installed (https://sr.ht/~geb/dotool/)
-//! - User in 'input' group for uinput access
-//! - DOTOOL_XKB_LAYOUT set (on dotoold for the fixed-layout fast path, or in
-//!   smellytype config for direct dotool fallback) for non-US keyboard layouts,
-//!   with the matching desktop layout active
+//! Requires dotool and uinput access. Configured XKB layout/variant hints apply
+//! to each process; the active compositor layout must match.
 
 use super::TextOutput;
 use crate::error::OutputError;
@@ -61,18 +27,6 @@ struct DotoolInvocation {
     pipe: Option<PathBuf>,
     set_layout_env: bool,
     skipped_daemon_for_layout: bool,
-}
-
-/// Truncate a string for log emission, replacing newlines with literal `\n`
-/// so multi-line dotool command streams stay on one log line. Keeps the
-/// first `max_chars` Unicode scalars and appends an ellipsis when cut.
-fn truncate_for_log(s: &str, max_chars: usize) -> String {
-    let one_line = s.replace('\n', "\\n");
-    if one_line.chars().count() <= max_chars {
-        return one_line;
-    }
-    let head: String = one_line.chars().take(max_chars).collect();
-    format!("{}…", head)
 }
 
 /// dotool-based text output with keyboard layout support.
@@ -114,36 +68,29 @@ impl DotoolOutput {
         }
     }
 
-    /// Public wrapper for the FIFO-detection helper so backspace paths
-    /// (in `output/streaming.rs`) can decide whether to use `dotoolc` too.
+    /// Shared FIFO discovery is disabled: no authenticated peer is available.
+    /// Streaming backspace callers must also use direct dotool.
     pub fn live_daemon_pipe_path() -> Option<PathBuf> {
-        Self::daemon_pipe_path()
+        None
     }
 
-    /// Detect whether `dotoold` is actually running and accepting input.
-    /// Returns the FIFO path only when it exists, is a FIFO, AND opening
-    /// it `O_WRONLY | O_NONBLOCK` succeeds — i.e. some process is reading
-    /// the other end. A crashed daemon leaves the FIFO on disk; the
-    /// kernel returns ENXIO from a non-blocking write-open in that case,
-    /// so we cleanly fall back to direct `dotool`.
     fn daemon_pipe_path() -> Option<PathBuf> {
-        use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
-        let path = std::env::var("DOTOOL_PIPE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp/dotool-pipe"));
-        let meta = std::fs::metadata(&path).ok()?;
-        if !meta.file_type().is_fifo() {
-            return None;
-        }
-        std::fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(&path)
-            .ok()?;
-        Some(path)
+        None
     }
 
-    fn build_commands(&self, text: &str) -> String {
+    fn build_commands(&self, text: &str) -> Result<String, OutputError> {
+        // A line-oriented command transport cannot safely represent arbitrary
+        // control characters. Fail before spawning or writing any partial text.
+        if text.chars().any(char::is_control)
+            || self
+                .append_text
+                .as_deref()
+                .is_some_and(|s| s.chars().any(char::is_control))
+        {
+            return Err(OutputError::InjectionFailed(
+                "dotool cannot safely type control characters; use another output backend".into(),
+            ));
+        }
         let mut commands = String::new();
 
         // Set delays if configured
@@ -166,7 +113,7 @@ impl DotoolOutput {
             commands.push_str("key enter\n");
         }
 
-        commands
+        Ok(commands)
     }
 
     fn has_xkb_override(&self) -> bool {
@@ -216,24 +163,13 @@ impl TextOutput for DotoolOutput {
             tokio::time::sleep(Duration::from_millis(self.pre_type_delay_ms as u64)).await;
         }
 
-        let commands = self.build_commands(text);
+        let commands = self.build_commands(text)?;
         let invocation = self.choose_invocation(Self::daemon_pipe_path());
         if invocation.skipped_daemon_for_layout {
             tracing::debug!(
                 "dotool: using direct dotool instead of dotoolc so the XKB layout/variant hint is honored"
             );
         }
-        // Wire trace only at the TRACE level so the user's typed text
-        // isn't dumped to logs on the default -vv (DEBUG) verbosity.
-        // The dotool command stream contains every typed character.
-        if tracing::enabled!(target: "smellytype::dotool::wire", tracing::Level::TRACE) {
-            tracing::trace!(
-                target: "smellytype::dotool::wire",
-                "-> {:?}",
-                truncate_for_log(&commands, 40)
-            );
-        }
-
         let mut cmd = Command::new(invocation.binary);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -326,6 +262,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_protocol_injection_before_output() {
+        let output = DotoolOutput::new(0, 0, false, None, None, None);
+        for text in [
+            "hello\nkey enter",
+            "hello\rkey ctrl+a",
+            "hello\0world",
+            "hello\x1bworld",
+            "hello\tworld",
+        ] {
+            assert!(output.build_commands(text).is_err());
+        }
+        let append = DotoolOutput::new(0, 0, false, Some("\nkey enter".into()), None, None);
+        assert!(append.build_commands("你好").is_err());
+        assert_eq!(
+            output.build_commands("你好 key enter").unwrap(),
+            "type 你好 key enter\n"
+        );
+    }
+
+    #[test]
+    fn shared_daemon_discovery_is_disabled_for_all_output_paths() {
+        assert!(DotoolOutput::daemon_pipe_path().is_none());
+        assert!(DotoolOutput::live_daemon_pipe_path().is_none());
+    }
+
+    #[test]
     fn test_new() {
         let output = DotoolOutput::new(10, 0, false, None, Some("de".to_string()), None);
         assert_eq!(output.type_delay_ms, 10);
@@ -337,14 +299,14 @@ mod tests {
     #[test]
     fn build_commands_basic() {
         let output = DotoolOutput::new(0, 0, false, None, None, None);
-        let cmds = output.build_commands("Hello world");
+        let cmds = output.build_commands("Hello world").unwrap();
         assert_eq!(cmds, "type Hello world\n");
     }
 
     #[test]
     fn build_commands_with_delay() {
         let output = DotoolOutput::new(17, 0, false, None, None, None);
-        let cmds = output.build_commands("Test");
+        let cmds = output.build_commands("Test").unwrap();
         assert!(cmds.contains("typedelay 17"));
         assert!(cmds.contains("typehold 17"));
         assert!(cmds.contains("type Test"));
@@ -353,14 +315,14 @@ mod tests {
     #[test]
     fn build_commands_auto_submit_appends_enter() {
         let output = DotoolOutput::new(0, 0, true, None, None, None);
-        let cmds = output.build_commands("hi");
+        let cmds = output.build_commands("hi").unwrap();
         assert!(cmds.contains("key enter"));
     }
 
     #[test]
     fn build_commands_appends_text_before_enter() {
         let output = DotoolOutput::new(0, 0, true, Some(".".to_string()), None, None);
-        let cmds = output.build_commands("hi");
+        let cmds = output.build_commands("hi").unwrap();
         let dot_pos = cmds.find("type .\n").unwrap();
         let enter_pos = cmds.find("key enter\n").unwrap();
         assert!(dot_pos < enter_pos);

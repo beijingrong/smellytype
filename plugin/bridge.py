@@ -9,7 +9,7 @@ import time
 import tomllib
 
 HOME_DIR = Path.home()
-RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'smellytype'
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.geteuid()}') / 'smellytype'
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME', str(HOME_DIR / '.config'))) / 'smellytype/config.toml'
 USAGE = Path(os.environ.get('XDG_STATE_HOME', str(HOME_DIR / '.local/state'))) / 'smellytype/dictation-usage.json'
 BINARY = HOME_DIR / '.local/lib/smellytype/bin/smellytype'

@@ -246,13 +246,17 @@ impl Config {
         None
     }
 
-    /// Get the runtime directory for ephemeral files (state, sockets)
+    /// Resolve and validate private ephemeral state before any consumer uses it.
+    /// Never fall back to a shared /tmp namespace. On Linux, an unset XDG value
+    /// may use the session directory created by the service manager.
     pub fn runtime_dir() -> PathBuf {
-        // Use XDG_RUNTIME_DIR if available, otherwise fall back to /tmp
-        std::env::var("XDG_RUNTIME_DIR")
+        let base = std::env::var_os("XDG_RUNTIME_DIR")
+            .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp"))
-            .join("smellytype")
+            .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::geteuid() })));
+        private_runtime_dir(&base).unwrap_or_else(|err| {
+            panic!("Unsafe or unavailable SmellyType runtime directory: {err}. Set XDG_RUNTIME_DIR to a private session directory.")
+        })
     }
 
     /// Resolve the state file path from config
@@ -584,5 +588,80 @@ mod tests {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
         }
+    }
+}
+
+/// The parent must already be a private, non-symlink directory owned by us.
+/// Its exclusive ownership makes creation and subsequent child validation safe
+/// against another UID replacing paths between calls.
+fn private_runtime_dir(base: &std::path::Path) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    fn check(path: &std::path::Path) -> std::io::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::symlink_metadata(path)?;
+        if !path.is_absolute()
+            || !meta.is_dir()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.mode() & 0o077 != 0
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "runtime path must be an absolute, private directory owned by the current user",
+            ));
+        }
+        Ok(())
+    }
+    check(base)?;
+    let target = base.join("smellytype");
+    match std::fs::DirBuilder::new().mode(0o700).create(&target) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            let meta = std::fs::symlink_metadata(&target)?;
+            if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "invalid runtime child",
+                ));
+            }
+            // Prior versions created a 0755 child inside the private XDG root.
+            // Tightening this user-owned directory preserves existing sessions.
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Err(err) => return Err(err),
+    }
+    check(&target)?;
+    Ok(target)
+}
+
+#[cfg(test)]
+mod runtime_security_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn runtime_rejects_shared_roots_and_symlinks_without_touching_targets() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let target = tempfile::tempdir().unwrap();
+        symlink(target.path(), root.path().join("smellytype")).unwrap();
+        assert!(private_runtime_dir(root.path()).is_err());
+        assert!(std::fs::read_dir(target.path()).unwrap().next().is_none());
+        std::fs::remove_file(root.path().join("smellytype")).unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(private_runtime_dir(root.path()).is_err());
+        assert!(!root.path().join("smellytype").exists());
+    }
+
+    #[test]
+    fn runtime_is_private_and_rejects_symlink_parent() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let dir = private_runtime_dir(root.path()).unwrap();
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+        let aliases = tempfile::tempdir().unwrap();
+        symlink(root.path(), aliases.path().join("alias")).unwrap();
+        assert!(private_runtime_dir(&aliases.path().join("alias")).is_err());
     }
 }

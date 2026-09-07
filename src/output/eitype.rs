@@ -130,7 +130,7 @@ impl EitypeOutput {
         // Apply layout hint (e.g. -l ru when transcribing Russian on a US layout).
         self.apply_layout_args(&mut cmd, &mut debug_args);
 
-        debug_args.push(format!("\"{}\"", text.chars().take(20).collect::<String>()));
+        debug_args.push(format!("<{} chars>", text.chars().count()));
         tracing::debug!("Running: {}", debug_args.join(" "));
 
         let output = cmd

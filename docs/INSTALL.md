@@ -16,7 +16,7 @@ cd smellytype
 ## Build
 
 ```sh
-cargo build --release --bin smellytype --bin smellytype-osd --bin smellytype-osd-quickshell --bin smellytype-audio-bridge
+cargo build --locked --release --bin smellytype --bin smellytype-osd --bin smellytype-osd-quickshell --bin smellytype-audio-bridge
 cargo test --lib
 python3 -m unittest discover -s plugin/tests -v
 ```
@@ -88,3 +88,22 @@ for a dev build). This copies the current YunType settings, private key and
 usage, replaces its marked F9 binding block, and disables the old service and
 plugin. SmellyType Configuration replaces the old YunType menu entry. Original
 YunType files/binaries remain for rollback; Voxtype is unaffected by this path.
+
+## Security update (0.1.1)
+
+The daemon requires a private runtime directory owned by the current user.
+On Linux, an unset `XDG_RUNTIME_DIR` uses `/run/user/<uid>` only if that session
+directory exists and is private. A shared `/tmp` fallback is no longer used.
+Run from your desktop session; do not loosen directory permissions to bypass
+this check.
+
+Normal transcript diagnostics now contain completion metadata instead of speech
+text. This does not remove logs written by earlier versions. Explicit transcript
+file output, clipboard output and user-configured postprocessors still receive
+text by design.
+
+The optional dotool driver now uses direct processes instead of discovering a
+shared daemon FIFO. Text containing control characters is rejected by that
+driver before output; the configured fallback chain may deliver it through
+another backend, such as the clipboard. This can increase dotool startup latency.
+The default wtype path remains available.
