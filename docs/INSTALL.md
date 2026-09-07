@@ -1,6 +1,6 @@
 # Install SmellyType
 
-Target for this initial trial: Omarchy with Quickshell and Hyprland Lua config,
+Supported environment for this preview: Omarchy with Quickshell and Hyprland Lua config,
 standard `~/.config`, `~/.local/share`, `~/.local/state` directories. Rust/Cargo,
 Clang, CMake, pkgconf, alsa-lib, Python 3.11+, Quickshell, wtype and systemd user
 services are required. No Voxtype package or local speech model is required.

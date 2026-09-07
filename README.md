@@ -1,50 +1,40 @@
 # SmellyType
 
-面向 Omarchy 的豆包云端语音输入：按住 F9 说话，松开后输入最终文字。
-支持实时预览、时长设置和累计录音统计，无需安装原版 Voxtype 或下载本地模型。
+面向 Omarchy / Hyprland 的豆包云端语音输入。按住 **F9** 说话，松开后将识别结果输入当前应用。
+
+**SmellyType 基于 [Voxtype](https://github.com/peteonrails/voxtype) 分叉开发，直接沿用了大量核心代码。** 感谢 **Peter Jackson（peteonrails）和所有 Voxtype 贡献者**：音频采集、录音与识别流程、文字输出和屏幕提示（OSD）等基础能力都来自他们的工作。SmellyType 在此基础上加入豆包云端识别、录音用量统计和 Omarchy 控制面板。
+
+## 功能
+
+- **豆包流式识别 2.0**：说话时显示实时预览，结束后一次性输入最终文字。
+- **快捷键输入**：按住 F9 录音，或用 Super+Ctrl+X 切换录音状态。
+- **状态栏面板**：开始、停止或取消录音，调整单次录音上限和识别等待时间。
+- **累计录音统计**：查看本机录音分钟数和次数。
+
+## 安装
 
 把下面这句话发给你的 Agent：
 
-> 请帮我安装 https://github.com/beijingrong/smellytype ，先阅读仓库的 AGENTS.md。
+> 请帮我安装 https://github.com/beijingrong/smellytype ，先阅读仓库的 AGENTS.md 和 docs/INSTALL.md。
 
-首次使用仍需你开通豆包流式语音服务，并在本机填写 API Key。
+需要支持 Quickshell 的 Omarchy / Hyprland 环境、网络连接，以及已开通豆包流式语音识别服务的火山引擎 API Key。密钥在本机填写，请勿发到聊天或提交到仓库。
 
+目前为 **0.1.0 预览版**，从源码构建安装。完整依赖、安装步骤、更新和迁移说明见 [安装文档](docs/INSTALL.md)。无需另行安装 Voxtype 或下载本地语音模型。
 
-Independent cloud dictation for Omarchy / Hyprland, initially using Doubao
-streaming ASR 2.0. Version 0.1.0 is an early preview.
+安装程序包含控制面板。已有 SmellyType 的用户也可通过 [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype) 独立安装和更新插件。点击状态栏麦克风或打开 **SmellyType Configuration** 即可进入面板。
 
-Hold F9 to speak, release for final text. Preview revisions are displayed, not
-typed into the application. The Omarchy panel provides recording controls,
-limits, final-response timeout, local usage, service controls and private key entry.
+## 使用说明
 
-Give an Agent this repository and say **“Install SmellyType for me.”** Start at
-[AGENTS.md](AGENTS.md) and [docs/INSTALL.md](docs/INSTALL.md).
+- 录音会发送到豆包云端识别；服务开通、额度和费用由火山引擎管理。
+- 单次录音上限与结束录音后的识别等待时间分别设置。
+- 累计分钟数记录本机麦克风使用时间，包含取消或失败的录音，不等同于云端账单或剩余免费额度。
 
-- No installed Voxtype package or local speech model is required.
-- Separate `smellytype` command, `smellytype.service`, `~/.config/smellytype/`, runtime
-  sockets and usage history.
-- Separate **SmellyType Configuration** menu entry; no Voxtype menu override.
-- Optional [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype)
-  plugin: `beijingrong.smellytype`. Its canonical source remains in `plugin/`;
-  the standalone repository supports native Omarchy installation and updates.
-- MIT licensed; derived from Voxtype, with original license and credit retained.
+## 致谢与许可
 
-This first version is a standalone product fork, not a complete rewrite or a
-fully minimized core. Reliable audio capture, dictation lifecycle, output drivers
-and OSD infrastructure are inherited from Voxtype. Local-model implementation
-and build dependencies still exist internally; removing them is future work.
-The supported SmellyType runtime selects Doubao, and does not offer local-model
-installation, meeting transcription or upstream self-update workflows.
+Voxtype 是 SmellyType 的代码基础。我们保留其原始 MIT 版权声明，并继续以 **MIT** 许可开源。详见 [LICENSE](LICENSE)、[来源与修改说明](NOTICE) 和 [第三方声明](THIRD_PARTY.md)。本项目由独立维护者开发，与 Voxtype、Omarchy 或火山引擎无官方隶属关系。
 
-Recording limits and final-response waits are independent. Local cumulative
-minutes count microphone time including cancelled/failed sessions, not provider
-billing. Earlier usage can be copied during migration. A crash can lose the
-ongoing session. Never infer remaining free allowance from the local counter.
+如果你希望使用本地模型，欢迎了解和支持上游项目 **[Voxtype](https://github.com/peteonrails/voxtype)**。
 
-Repository: [beijingrong/smellytype](https://github.com/beijingrong/smellytype).
-The Omarchy plugin-directory listing has not been submitted yet.
+---
 
-Renamed from the initial YunType trial. To migrate that installation, use
-`python3 scripts/install.py --activate --migrate-yuntype`. Settings, key and
-usage are copied; the old service/plugin/menu are disabled or removed, with
-a rollback snapshot. The earlier Voxtype migration is still supported.
+SmellyType is a Doubao cloud dictation app for Omarchy / Hyprland, **forked from [Voxtype](https://github.com/peteonrails/voxtype)**. It directly reuses substantial upstream code for audio capture, dictation lifecycle, text output and OSD. Thank you to **Peter Jackson and the Voxtype contributors** for this foundation. Our additions include Doubao streaming ASR, local usage tracking and an Omarchy control panel. MIT licensed; original attribution is preserved. See the [installation guide](docs/INSTALL.md) to get started.
