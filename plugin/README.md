@@ -2,7 +2,7 @@
 
 An Omarchy Quattro bar plugin for [SmellyType](https://github.com/beijingrong/smellytype), the standalone Doubao cloud dictation client.
 
-点击麦克风，控制语音输入、调整录音上限和识别等待时间、查看累计录音分钟数。
+点击状态栏 **S** 按钮，控制语音输入、调整录音上限和识别等待时间、查看累计录音分钟数。
 
 ## Requirements
 
@@ -32,7 +32,7 @@ This explicitly installs or updates **SmellyType Configuration** in the user app
 
 ## Use and configure
 
-Click the microphone to open the panel; Escape closes it. F9 still belongs to the core client's installation. The panel closes before recording starts/stops so final text can return to the previous application.
+Click the **S** button to open the panel; Escape closes it. F9 still belongs to the core client's installation. The panel closes before recording starts/stops so final text can return to the previous application.
 
 - Start, stop and cancel recording.
 - Per-recording limit: 1, 3, 5 or 10 minutes.

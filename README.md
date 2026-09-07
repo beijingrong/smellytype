@@ -23,7 +23,7 @@
 
 目前为 **0.1.1 预览版**，从源码构建安装。完整依赖、安装步骤、更新和迁移说明见 [安装文档](docs/INSTALL.md)。无需另行安装 Voxtype 或下载本地语音模型。
 
-安装程序包含控制面板。已有 SmellyType 的用户也可通过 [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype) 独立安装和更新插件。点击状态栏麦克风或打开 **SmellyType Configuration** 即可进入面板。
+安装程序包含控制面板。已有 SmellyType 的用户也可通过 [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype) 独立安装和更新插件。点击状态栏 **S** 按钮或打开 **SmellyType Configuration** 即可进入面板。
 
 ## 使用说明
 
