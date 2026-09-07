@@ -68,16 +68,16 @@ BarWidget {
         bar: root.bar
         hasVisualContent: true
         labelVisible: false
-        fixedWidth: root.info.recording ? 44 : 34
+        fixedWidth: root.info.recording ? 40 : 30
         Image {
             id: cat
             anchors.centerIn: parent
             anchors.horizontalCenterOffset: root.info.recording ? 4 : 0
-            width: Math.min(button.barSize - 4, 24)
+            width: Math.min(button.barSize - 6, 18)
             height: width
             source: Qt.resolvedUrl("cat-sitting.svg")
-            sourceSize.width: 96
-            sourceSize.height: 96
+            sourceSize.width: 72
+            sourceSize.height: 72
             fillMode: Image.PreserveAspectFit
             visible: false
             layer.enabled: true
