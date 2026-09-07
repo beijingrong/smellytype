@@ -65,7 +65,7 @@ BarWidget {
         id: button
         anchors.fill: parent
         bar: root.bar
-        text: root.info.recording ? "● S" : "S"
+        text: root.info.recording ? "● 󰄛" : "󰄛"
         tooltipText: "SmellyType · 语音输入 · 本机累计 " + ((root.info.total_ms + root.info.elapsed_ms) / 60000).toFixed(1) + " 分钟"
         onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
     }

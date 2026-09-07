@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "beijingrong.smellytype",
   "name": "SmellyType for Omarchy",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": "Yirong Xu",
   "license": "MIT",
   "description": "Cloud dictation controls, recording limits and local usage for the SmellyType Doubao client",
