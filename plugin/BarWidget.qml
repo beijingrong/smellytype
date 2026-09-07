@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Ui
@@ -65,7 +66,35 @@ BarWidget {
         id: button
         anchors.fill: parent
         bar: root.bar
-        text: root.info.recording ? "● 󰄛" : "󰄛"
+        hasVisualContent: true
+        labelVisible: false
+        fixedWidth: root.info.recording ? 44 : 34
+        Image {
+            id: cat
+            anchors.centerIn: parent
+            anchors.horizontalCenterOffset: root.info.recording ? 4 : 0
+            width: Math.min(button.barSize - 4, 24)
+            height: width
+            source: Qt.resolvedUrl("cat-sitting.svg")
+            sourceSize.width: 96
+            sourceSize.height: 96
+            fillMode: Image.PreserveAspectFit
+            visible: false
+            layer.enabled: true
+        }
+        MultiEffect {
+            anchors.fill: cat
+            source: cat
+            colorization: 1.0
+            colorizationColor: button.foreground
+        }
+        Rectangle {
+            visible: root.info.recording
+            width: 4; height: 4; radius: 2
+            anchors.verticalCenter: parent.verticalCenter
+            x: cat.x - 7
+            color: button.foreground
+        }
         tooltipText: "SmellyType · 语音输入 · 本机累计 " + ((root.info.total_ms + root.info.elapsed_ms) / 60000).toFixed(1) + " 分钟"
         onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
     }
