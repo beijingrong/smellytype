@@ -1,5 +1,7 @@
 # SmellyType
 
+**简体中文** | [English](README.en.md)
+
 面向 Omarchy / Hyprland 的豆包云端语音输入。按住 **F9** 说话，松开后将识别结果输入当前应用。
 
 **SmellyType 基于 [Voxtype](https://github.com/peteonrails/voxtype) 分叉开发，直接沿用了大量核心代码。** 感谢 **Peter Jackson（peteonrails）和所有 Voxtype 贡献者**：音频采集、录音与识别流程、文字输出和屏幕提示（OSD）等基础能力都来自他们的工作。SmellyType 在此基础上加入豆包云端识别、录音用量统计和 Omarchy 控制面板。
@@ -34,7 +36,3 @@
 Voxtype 是 SmellyType 的代码基础。我们保留其原始 MIT 版权声明，并继续以 **MIT** 许可开源。详见 [LICENSE](LICENSE)、[来源与修改说明](NOTICE) 和 [第三方声明](THIRD_PARTY.md)。本项目由独立维护者开发，与 Voxtype、Omarchy 或火山引擎无官方隶属关系。
 
 如果你希望使用本地模型，欢迎了解和支持上游项目 **[Voxtype](https://github.com/peteonrails/voxtype)**。
-
----
-
-SmellyType is a Doubao cloud dictation app for Omarchy / Hyprland, **forked from [Voxtype](https://github.com/peteonrails/voxtype)**. It directly reuses substantial upstream code for audio capture, dictation lifecycle, text output and OSD. Thank you to **Peter Jackson and the Voxtype contributors** for this foundation. Our additions include Doubao streaming ASR, local usage tracking and an Omarchy control panel. MIT licensed; original attribution is preserved. See the [installation guide](docs/INSTALL.md) to get started.
