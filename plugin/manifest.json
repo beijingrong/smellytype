@@ -1,12 +1,21 @@
 {
   "schemaVersion": 1,
   "id": "beijingrong.smellytype",
-  "name": "SmellyType Dictation",
-  "version": "0.1.0",
+  "name": "SmellyType for Omarchy",
+  "version": "0.1.1",
   "author": "Yirong Xu",
   "license": "MIT",
-  "description": "Doubao dictation controls, recording limit and local recording minutes",
-  "kinds": ["bar-widget"],
-  "entryPoints": {"barWidget": "BarWidget.qml"},
-  "barWidget": {"displayName": "语音输入", "category": "Productivity", "allowMultiple": false, "defaultSection": "right"}
+  "description": "Cloud dictation controls, recording limits and local usage for the SmellyType Doubao client",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "SmellyType",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
 }

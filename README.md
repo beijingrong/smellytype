@@ -24,7 +24,9 @@ Give an Agent this repository and say **“Install SmellyType for me.”** Start
 - Separate `smellytype` command, `smellytype.service`, `~/.config/smellytype/`, runtime
   sockets and usage history.
 - Separate **SmellyType Configuration** menu entry; no Voxtype menu override.
-- Optional Omarchy plugin, included in this repository: `beijingrong.smellytype`.
+- Optional [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype)
+  plugin: `beijingrong.smellytype`. Its canonical source remains in `plugin/`;
+  the standalone repository supports native Omarchy installation and updates.
 - MIT licensed; derived from Voxtype, with original license and credit retained.
 
 This first version is a standalone product fork, not a complete rewrite or a

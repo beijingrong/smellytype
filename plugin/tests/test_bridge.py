@@ -20,6 +20,7 @@ class BridgeTests(unittest.TestCase):
         self.patcher = patch.multiple(bridge, RUNTIME=root, CONFIG=root/'config.toml', USAGE=root/'usage.json', BINARY=root/'smellytype')
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
+        bridge.BINARY.touch()
         bridge.CONFIG.write_text('[audio]\nmax_duration_secs = 180\n')
         (root/'state').write_text('idle')
         (root/'pid').write_text(str(os.getpid()))
@@ -31,6 +32,17 @@ class BridgeTests(unittest.TestCase):
             bridge.main(['timeout', '120'])
             self.assertIn('doubao.final_timeout_secs', run.call_args_list[0].args)
             self.assertEqual(run.call_args_list[0].args[-1], '120')
+
+    def test_missing_backend_has_actionable_status_without_running_commands(self):
+        bridge.BINARY.unlink()
+        bridge.CONFIG.unlink()
+        result = bridge.status()
+        self.assertFalse(result['installed'])
+        self.assertFalse(result['configured'])
+        with patch.object(bridge, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'github.com/beijingrong/smellytype'):
+                bridge.main(['restart'])
+            run.assert_not_called()
 
     def test_live_and_persisted_time(self):
         bridge.USAGE.write_text(json.dumps({'total_ms': 60000, 'sessions': 2}))

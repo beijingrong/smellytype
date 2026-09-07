@@ -22,9 +22,10 @@ def preserve(path):
 
 preserve(config/'omarchy/shell.json')
 dest.mkdir(parents=True, exist_ok=True)
-for name in ('manifest.json','BarWidget.qml','Panel.qml','bridge.py','credentials.py','configure.py'):
-    preserve(dest/name)
-    shutil.copy2(source/name, dest/name)
+for name in ('manifest.json','BarWidget.qml','Panel.qml','bridge.py','credentials.py','configure.py','uninstall.py'):
+    if (source/name).resolve() != (dest/name).resolve():
+        preserve(dest/name)
+        shutil.copy2(source/name, dest/name)
 (dest/'configure.py').chmod(0o755)
 desktop = data/'applications/smellytype-configure.desktop'
 desktop.parent.mkdir(parents=True, exist_ok=True)

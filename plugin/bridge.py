@@ -30,7 +30,9 @@ def status():
     try: state = (RUNTIME / 'state').read_text().strip()
     except FileNotFoundError: state = 'offline'
     if not daemon_alive(): state = 'offline'
-    with CONFIG.open('rb') as f: cfg = tomllib.load(f)
+    try:
+        with CONFIG.open('rb') as f: cfg = tomllib.load(f)
+    except FileNotFoundError: cfg = {}
     usage = load_json(USAGE)
     active = load_json(RUNTIME / 'dictation-active.json')
     recording = False
@@ -44,7 +46,7 @@ def status():
             'limit': cfg.get('audio', {}).get('max_duration_secs', 60),
             'total_ms': usage.get('total_ms', 0), 'sessions': usage.get('sessions', 0),
             'since': usage.get('since', ''), 'elapsed_ms': elapsed,
-            'installed': BINARY.is_file()}
+            'installed': BINARY.is_file(), 'configured': CONFIG.is_file()}
 
 def run(*args):
     subprocess.run(args, check=True, capture_output=True, text=True, timeout=15)
@@ -53,6 +55,8 @@ def main(argv):
     action = argv[0] if argv else 'status'
     if action == 'status': return status()
     current = status()
+    if not current['installed'] or not current['configured']:
+        raise ValueError('请先安装并配置 SmellyType：github.com/beijingrong/smellytype')
     if action in ('limit', 'timeout'):
         if current['state'] != 'idle': raise ValueError('请先结束录音并等待识别完成')
         seconds = int(argv[1])

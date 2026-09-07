@@ -37,9 +37,15 @@ Panel {
             spacing: Style.space(14)
             Text { text: "SmellyType"; color: Color.foreground; font.pixelSize: 22; font.bold: true }
             Text {
-                text: root.info.recording ? "● 正在录音 · " + Math.floor(root.info.elapsed_ms / 1000) + " 秒"
+                text: !root.info.installed || !root.info.configured ? "请先安装并配置 SmellyType 主程序" : root.info.recording ? "● 正在录音 · " + Math.floor(root.info.elapsed_ms / 1000) + " 秒"
                     : root.info.state === "offline" ? "语音服务未运行" : root.info.state === "idle" ? "就绪 · 按住 F9 说话" : "等待识别结果"
                 color: Color.foreground; font.pixelSize: 14
+            }
+            Text {
+                visible: !root.info.installed || !root.info.configured
+                width: parent.width
+                text: "github.com/beijingrong/smellytype"
+                color: Color.foreground; font.pixelSize: 12; wrapMode: Text.Wrap
             }
             Text {
                 text: ((Number(root.info.total_ms || 0) + Number(root.info.elapsed_ms || 0)) / 60000).toFixed(1) + " 分钟"
