@@ -1,0 +1,24 @@
+/* SmellyType voice-to-text status indicator
+ * Add to ~/.config/waybar/style.css or system waybar styles
+ */
+
+#custom-smellytype {
+    padding: 0 8px;
+}
+
+#custom-smellytype.idle {
+    color: @theme_text_color;
+}
+
+#custom-smellytype.recording {
+    color: @error_color;
+    animation: blink-critical 1s ease-in-out infinite;
+}
+
+#custom-smellytype.transcribing {
+    color: @warning_color;
+}
+
+#custom-smellytype.stopped {
+    color: alpha(@theme_text_color, 0.5);
+}

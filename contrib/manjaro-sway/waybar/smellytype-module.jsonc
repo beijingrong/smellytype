@@ -1,0 +1,15 @@
+// SmellyType voice-to-text module for Manjaro Sway Waybar
+// Add to modules-right (recommended position: near pulseaudio)
+//
+// In modules-right array:
+//   "custom/smellytype",
+//
+// Module definition:
+"custom/smellytype": {
+    "exec": "smellytype status --follow --format json --icon-theme nerd-font",
+    "return-type": "json",
+    "format": "{}",
+    "tooltip": true,
+    "on-click": "smellytype record toggle",
+    "on-click-right": "systemctl --user restart smellytype"
+}

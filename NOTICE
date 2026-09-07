@@ -1,0 +1,11 @@
+SmellyType is derived from Voxtype (MIT), Copyright (c) 2025 Peter Jackson,
+and its contributors. Upstream: https://github.com/peteonrails/voxtype
+Base checkout: e325106 (Voxtype 1.0.1 development tree).
+
+SmellyType modifications, Doubao backend integration, usage tracking and Omarchy
+plugin: Copyright (c) 2026 Yirong Xu. Distributed under the MIT license.
+The original MIT notice is retained in LICENSE. See THIRD_PARTY.md for assets.
+
+Initial extraction retains upstream implementation modules, including local
+engine code. Independent installation does not mean independently authored
+code. SmellyType does not claim to be an official Voxtype or Omarchy release.

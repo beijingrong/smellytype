@@ -1,0 +1,1349 @@
+//! Setup module for smellytype installation and configuration
+//!
+//! Provides subcommands for:
+//! - systemd service installation
+//! - Waybar configuration generation
+//! - Interactive model selection
+//! - Output chain detection
+//! - GPU backend management
+//! - NPU backend management (Intel NPU via OpenVINO)
+//! - Parakeet backend management
+//! - Compositor integration (modifier key fix)
+
+pub mod accel;
+#[cfg(target_os = "macos")]
+pub mod app_bundle;
+pub mod binary;
+pub mod compositor;
+pub mod dms;
+pub mod gpu;
+#[cfg(target_os = "macos")]
+pub mod hammerspoon;
+pub mod launchd;
+#[cfg(target_os = "macos")]
+pub mod macos;
+pub mod manifest;
+pub mod model;
+pub mod npu;
+pub mod parakeet;
+pub mod progress;
+pub mod quickshell;
+pub mod systemd;
+pub mod vad;
+pub mod variant_check;
+pub mod waybar;
+
+use crate::config::Config;
+use std::process::Stdio;
+use tokio::process::Command;
+
+/// Display server type
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DisplayServer {
+    Wayland,
+    X11,
+    MacOS,
+    Unknown,
+}
+
+impl std::fmt::Display for DisplayServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DisplayServer::Wayland => write!(f, "Wayland"),
+            DisplayServer::X11 => write!(f, "X11"),
+            DisplayServer::MacOS => write!(f, "macOS"),
+            DisplayServer::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+/// Output tool status
+#[derive(Debug)]
+pub struct OutputToolStatus {
+    pub name: &'static str,
+    pub installed: bool,
+    pub available: bool,
+    pub path: Option<String>,
+    pub note: Option<String>,
+}
+
+/// Complete output chain status
+#[derive(Debug)]
+pub struct OutputChainStatus {
+    pub display_server: DisplayServer,
+    pub wtype: OutputToolStatus,
+    pub eitype: OutputToolStatus,
+    pub ydotool: OutputToolStatus,
+    pub ydotool_daemon: bool,
+    pub wl_copy: OutputToolStatus,
+    pub xclip: OutputToolStatus,
+    // macOS-specific
+    pub osascript: OutputToolStatus,
+    pub pbcopy: OutputToolStatus,
+    pub primary_method: Option<String>,
+}
+
+/// Check if user is in a specific group
+pub fn user_in_group(group: &str) -> bool {
+    std::process::Command::new("groups")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(group))
+        .unwrap_or(false)
+}
+
+/// Get the smellytype binary path
+pub fn get_smellytype_path() -> String {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "smellytype".to_string())
+}
+
+/// Get the smellytype binary path for service files
+///
+/// In tiered mode (DEB/RPM packages), returns /usr/bin/smellytype (the symlink)
+/// so backend switching only requires a service restart rather than regenerating
+/// the service file.
+pub fn get_smellytype_service_path() -> String {
+    // AppImage: use the .AppImage file path directly
+    // The APPIMAGE env var is set automatically by the AppImage runtime
+    if let Ok(appimage_path) = std::env::var("APPIMAGE") {
+        return appimage_path;
+    }
+
+    const SMELLYTYPE_BIN: &str = "/usr/bin/smellytype";
+
+    // If /usr/bin/smellytype exists (either as symlink or binary), use it
+    // This allows backend switching to work with just a service restart
+    if std::path::Path::new(SMELLYTYPE_BIN).exists()
+        || std::fs::symlink_metadata(SMELLYTYPE_BIN).is_ok()
+    {
+        return SMELLYTYPE_BIN.to_string();
+    }
+
+    // Fallback to current exe (for non-standard installations)
+    get_smellytype_path()
+}
+
+/// Print a success message
+pub fn print_success(msg: &str) {
+    println!("  \x1b[32m✓\x1b[0m {}", msg);
+}
+
+/// Print a failure message
+pub fn print_failure(msg: &str) {
+    println!("  \x1b[31m✗\x1b[0m {}", msg);
+}
+
+/// Print an info message
+pub fn print_info(msg: &str) {
+    println!("  \x1b[34mℹ\x1b[0m {}", msg);
+}
+
+/// Print a warning message
+pub fn print_warning(msg: &str) {
+    println!("  \x1b[33m⚠\x1b[0m {}", msg);
+}
+
+/// Detect the current display server
+pub fn detect_display_server() -> DisplayServer {
+    // Check for macOS first
+    #[cfg(target_os = "macos")]
+    {
+        return DisplayServer::MacOS;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Check for Wayland first
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            return DisplayServer::Wayland;
+        }
+        // Check for X11
+        if std::env::var("DISPLAY").is_ok() {
+            return DisplayServer::X11;
+        }
+        DisplayServer::Unknown
+    }
+}
+
+/// Get the path to a command if it exists
+pub async fn get_command_path(cmd: &str) -> Option<String> {
+    let output = Command::new("which").arg(cmd).output().await.ok()?;
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// Check if ydotool daemon is running
+pub async fn is_ydotool_daemon_running() -> bool {
+    // Try using systemctl first
+    let systemctl_check = Command::new("systemctl")
+        .args(["--user", "is-active", "ydotool"])
+        .output()
+        .await;
+
+    if let Ok(output) = systemctl_check {
+        if output.status.success() {
+            return true;
+        }
+    }
+
+    // Fallback: try a no-op ydotool command
+    Command::new("ydotool")
+        .args(["type", ""])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Detect the full output chain status
+pub async fn detect_output_chain() -> OutputChainStatus {
+    let display_server = detect_display_server();
+
+    // Check wtype
+    let wtype_path = get_command_path("wtype").await;
+    let wtype_installed = wtype_path.is_some();
+    let wtype_available = wtype_installed && display_server == DisplayServer::Wayland;
+    let wtype_note = if wtype_installed && display_server != DisplayServer::Wayland {
+        Some("Wayland only".to_string())
+    } else {
+        None
+    };
+
+    // Check eitype
+    let eitype_path = get_command_path("eitype").await;
+    let eitype_installed = eitype_path.is_some();
+    let eitype_available = eitype_installed && display_server == DisplayServer::Wayland;
+    let eitype_note = if eitype_installed && display_server != DisplayServer::Wayland {
+        Some("Wayland only".to_string())
+    } else {
+        None
+    };
+
+    // Check ydotool
+    let ydotool_path = get_command_path("ydotool").await;
+    let ydotool_installed = ydotool_path.is_some();
+    let ydotool_daemon = if ydotool_installed {
+        is_ydotool_daemon_running().await
+    } else {
+        false
+    };
+    let ydotool_available = ydotool_installed && ydotool_daemon;
+    let ydotool_note = if ydotool_installed && !ydotool_daemon {
+        Some("daemon not running".to_string())
+    } else {
+        None
+    };
+
+    // Check wl-copy
+    let wl_copy_path = get_command_path("wl-copy").await;
+    let wl_copy_installed = wl_copy_path.is_some();
+    let wl_copy_available = wl_copy_installed && display_server == DisplayServer::Wayland;
+    let wl_copy_note = if wl_copy_installed && display_server != DisplayServer::Wayland {
+        Some("Wayland only".to_string())
+    } else {
+        None
+    };
+
+    // Check xclip
+    let xclip_path = get_command_path("xclip").await;
+    let xclip_installed = xclip_path.is_some();
+    let xclip_available = xclip_installed && display_server == DisplayServer::X11;
+    let xclip_note = if xclip_installed && display_server != DisplayServer::X11 {
+        Some("X11 only".to_string())
+    } else {
+        None
+    };
+
+    // Check osascript (macOS)
+    let osascript_path = get_command_path("osascript").await;
+    let osascript_installed = osascript_path.is_some();
+    let osascript_available = osascript_installed && display_server == DisplayServer::MacOS;
+    let osascript_note = if osascript_installed && !osascript_available {
+        Some("macOS only".to_string())
+    } else if osascript_available {
+        Some("requires Accessibility permission".to_string())
+    } else {
+        None
+    };
+
+    // Check pbcopy (macOS)
+    let pbcopy_path = get_command_path("pbcopy").await;
+    let pbcopy_installed = pbcopy_path.is_some();
+    let pbcopy_available = pbcopy_installed && display_server == DisplayServer::MacOS;
+    let pbcopy_note = if pbcopy_installed && !pbcopy_available {
+        Some("macOS only".to_string())
+    } else {
+        None
+    };
+
+    // Determine primary method
+    let primary_method = if osascript_available {
+        Some("osascript".to_string())
+    } else if wtype_available {
+        Some("wtype".to_string())
+    } else if eitype_available {
+        Some("eitype".to_string())
+    } else if ydotool_available {
+        Some("ydotool".to_string())
+    } else if pbcopy_available {
+        Some("pbcopy".to_string())
+    } else if wl_copy_available || xclip_available {
+        Some("clipboard".to_string())
+    } else {
+        None
+    };
+
+    OutputChainStatus {
+        display_server,
+        wtype: OutputToolStatus {
+            name: "wtype",
+            installed: wtype_installed,
+            available: wtype_available,
+            path: wtype_path,
+            note: wtype_note,
+        },
+        eitype: OutputToolStatus {
+            name: "eitype",
+            installed: eitype_installed,
+            available: eitype_available,
+            path: eitype_path,
+            note: eitype_note,
+        },
+        ydotool: OutputToolStatus {
+            name: "ydotool",
+            installed: ydotool_installed,
+            available: ydotool_available,
+            path: ydotool_path,
+            note: ydotool_note,
+        },
+        ydotool_daemon,
+        wl_copy: OutputToolStatus {
+            name: "wl-copy",
+            installed: wl_copy_installed,
+            available: wl_copy_available,
+            path: wl_copy_path,
+            note: wl_copy_note,
+        },
+        xclip: OutputToolStatus {
+            name: "xclip",
+            installed: xclip_installed,
+            available: xclip_available,
+            path: xclip_path,
+            note: xclip_note,
+        },
+        osascript: OutputToolStatus {
+            name: "osascript",
+            installed: osascript_installed,
+            available: osascript_available,
+            path: osascript_path,
+            note: osascript_note,
+        },
+        pbcopy: OutputToolStatus {
+            name: "pbcopy",
+            installed: pbcopy_installed,
+            available: pbcopy_available,
+            path: pbcopy_path,
+            note: pbcopy_note,
+        },
+        primary_method,
+    }
+}
+
+/// Print output chain status
+pub fn print_output_chain_status(status: &OutputChainStatus) {
+    println!("\nOutput Chain:");
+
+    // Display server
+    let ds_info = match status.display_server {
+        DisplayServer::Wayland => {
+            let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
+            format!("Wayland (WAYLAND_DISPLAY={})", display)
+        }
+        DisplayServer::X11 => {
+            let display = std::env::var("DISPLAY").unwrap_or_default();
+            format!("X11 (DISPLAY={})", display)
+        }
+        DisplayServer::MacOS => "macOS (Quartz)".to_string(),
+        DisplayServer::Unknown => "Unknown (no WAYLAND_DISPLAY or DISPLAY set)".to_string(),
+    };
+    println!("  Display server:  {}", ds_info);
+
+    // Show platform-specific tools
+    if status.display_server == DisplayServer::MacOS {
+        // macOS tools
+        print_tool_status(&status.osascript, true);
+        print_tool_status(&status.pbcopy, true);
+    } else {
+        // Linux tools
+        // wtype
+        print_tool_status(
+            &status.wtype,
+            status.display_server == DisplayServer::Wayland,
+        );
+
+        // eitype
+        print_tool_status(
+            &status.eitype,
+            status.display_server == DisplayServer::Wayland,
+        );
+
+        // ydotool
+        if status.ydotool.installed {
+            let daemon_status = if status.ydotool_daemon {
+                "\x1b[32mdaemon running\x1b[0m"
+            } else {
+                "\x1b[31mdaemon not running\x1b[0m"
+            };
+            if let Some(ref path) = status.ydotool.path {
+                if status.ydotool.available {
+                    println!(
+                        "  ydotool:         \x1b[32m✓\x1b[0m installed ({}), {}",
+                        path, daemon_status
+                    );
+                } else {
+                    println!(
+                        "  ydotool:         \x1b[33m⚠\x1b[0m installed ({}), {}",
+                        path, daemon_status
+                    );
+                }
+            }
+        } else {
+            println!("  ydotool:         \x1b[31m✗\x1b[0m not installed");
+        }
+
+        // wl-copy
+        print_tool_status(
+            &status.wl_copy,
+            status.display_server == DisplayServer::Wayland,
+        );
+
+        // xclip (only show on X11 or if installed)
+        if status.display_server == DisplayServer::X11 || status.xclip.installed {
+            print_tool_status(&status.xclip, status.display_server == DisplayServer::X11);
+        }
+    }
+
+    // Summary
+    println!();
+    if let Some(ref method) = status.primary_method {
+        let method_desc = match method.as_str() {
+            "osascript" => "osascript (AppleScript/System Events)",
+            "pbcopy" => "pbcopy (clipboard, requires manual paste)",
+            "wtype" => "wtype (CJK supported)",
+            "eitype" => "eitype (libei, GNOME/KDE native)",
+            "ydotool" => "ydotool (CJK not supported)",
+            "clipboard" => "clipboard (requires manual paste)",
+            _ => method.as_str(),
+        };
+        println!("  \x1b[32m→\x1b[0m Text will be typed via {}", method_desc);
+    } else {
+        println!("  \x1b[31m→\x1b[0m No text output method available!");
+        if status.display_server == DisplayServer::MacOS {
+            println!("    osascript should be available on macOS");
+        } else {
+            println!("    Install wtype (Wayland), eitype (GNOME/KDE), or ydotool (X11) for typing support");
+        }
+    }
+}
+
+fn print_tool_status(tool: &OutputToolStatus, is_relevant: bool) {
+    if tool.installed {
+        let path = tool.path.as_deref().unwrap_or("?");
+        let note = tool
+            .note
+            .as_deref()
+            .map(|n| format!(" ({})", n))
+            .unwrap_or_default();
+
+        if tool.available {
+            println!(
+                "  {}:{}  \x1b[32m✓\x1b[0m installed ({}){}",
+                tool.name,
+                " ".repeat(14 - tool.name.len()),
+                path,
+                note
+            );
+        } else if is_relevant {
+            println!(
+                "  {}:{}  \x1b[33m⚠\x1b[0m installed ({}){}",
+                tool.name,
+                " ".repeat(14 - tool.name.len()),
+                path,
+                note
+            );
+        } else {
+            println!(
+                "  {}:{}  \x1b[90m✓ installed ({}){}\x1b[0m",
+                tool.name,
+                " ".repeat(14 - tool.name.len()),
+                path,
+                note
+            );
+        }
+    } else if is_relevant {
+        println!(
+            "  {}:{}  \x1b[31m✗\x1b[0m not installed",
+            tool.name,
+            " ".repeat(14 - tool.name.len())
+        );
+    } else {
+        println!(
+            "  {}:{}  \x1b[90m- not installed\x1b[0m",
+            tool.name,
+            " ".repeat(14 - tool.name.len())
+        );
+    }
+}
+
+/// Which engine a `smellytype setup --model <name>` argument refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelKind {
+    Whisper,
+    Parakeet,
+    SenseVoice,
+    OpenVino,
+}
+
+/// Resolve a `--model` name to the engine that owns it.
+///
+/// Whisper wins name collisions. `small` names both a Whisper model and
+/// SenseVoice's int8 export, and it meant Whisper for every release before
+/// SenseVoice existed, so resolving it to SenseVoice made
+/// `setup --download --model small` unable to fetch Whisper small at all: it
+/// failed the `sensevoice` feature gate on Whisper builds, and on ONNX builds
+/// it would have downloaded a different engine's model. SenseVoice's
+/// colliding names stay reachable under their directory form
+/// (`sensevoice-small`, `sensevoice-small-fp32`).
+pub(crate) fn classify_model_override(name: &str) -> anyhow::Result<ModelKind> {
+    if model::is_valid_model(name) {
+        Ok(ModelKind::Whisper)
+    } else if model::is_parakeet_model(name) {
+        Ok(ModelKind::Parakeet)
+    } else if model::is_sensevoice_model(name) {
+        Ok(ModelKind::SenseVoice)
+    } else if model::is_openvino_model(name) {
+        Ok(ModelKind::OpenVino)
+    } else {
+        anyhow::bail!(
+            "Unknown model '{}'.\n  Whisper: {}\n  Parakeet: {}\n  SenseVoice: {}\n  OpenVINO: {}",
+            name,
+            model::valid_model_names().join(", "),
+            model::valid_parakeet_model_names().join(", "),
+            model::sensevoice_setup_model_names().join(", "),
+            model::valid_openvino_model_names().join(", "),
+        )
+    }
+}
+
+/// Run setup tasks (non-blocking, no red X errors)
+///
+/// Flags:
+/// - `download`: Download model if missing
+/// - `model_override`: Specific model to download (use with `download`)
+/// - `quiet`: Suppress ALL output (for scripting/automation)
+/// - `no_post_install`: Suppress only "Next steps" instructions
+/// - `activate`: Also point the config at the model that was handled
+///
+/// `activate` is off by default because downloading is not selecting.
+/// Fetching a model used to rewrite `engine` and `<engine>.model` in the
+/// user's config as a side effect, which meant a GUI's Download button
+/// silently changed which engine the daemon would load, and the documented
+/// "pre-download your secondary models" sequence in `docs/CONFIGURATION.md`
+/// left the config pointing at whichever model happened to be fetched last.
+/// Model selection belongs to `smellytype config set`, the TUI, and the
+/// interactive picker (`smellytype setup model`), all of which write it
+/// explicitly.
+pub async fn run_setup(
+    config: &Config,
+    download: bool,
+    model_override: Option<&str>,
+    quiet: bool,
+    no_post_install: bool,
+    activate: bool,
+) -> anyhow::Result<()> {
+    if !quiet {
+        println!("SmellyType Setup\n");
+        println!("=============\n");
+
+        // Ensure directories exist first
+        println!("Creating directories...");
+    }
+    Config::ensure_directories()?;
+    if !quiet {
+        print_success(&format!(
+            "Config directory: {:?}",
+            Config::config_dir().unwrap_or_default()
+        ));
+        print_success(&format!("Models directory: {:?}", Config::models_dir()));
+    }
+
+    // Create default config file if it doesn't exist
+    if let Some(config_path) = Config::default_path() {
+        if !config_path.exists() {
+            if !quiet {
+                println!("\nCreating default config file...");
+            }
+            std::fs::write(&config_path, crate::config::default_config_content())?;
+            if !quiet {
+                print_success(&format!("Created: {:?}", config_path));
+            }
+        } else if !quiet {
+            print_success(&format!("Config file: {:?}", config_path));
+        }
+    }
+
+    let models_dir = Config::models_dir();
+
+    // Set when the run ends with a model on disk that can't be loaded, so the
+    // summary doesn't report success over it.
+    let mut left_damaged = false;
+
+    // Which engine `--model` named, rejecting names no engine claims.
+    let kind = match model_override {
+        Some(name) => Some(classify_model_override(name)?),
+        None => None,
+    };
+    let is_parakeet = kind == Some(ModelKind::Parakeet);
+    let is_sensevoice = kind == Some(ModelKind::SenseVoice);
+    let is_openvino = kind == Some(ModelKind::OpenVino);
+
+    if is_openvino {
+        // Handle OpenVINO model
+        #[allow(unused_variables)]
+        let model_name = model_override.unwrap(); // Safe: is_openvino implies Some
+
+        if !quiet {
+            println!("\nOpenVINO Whisper model...");
+        }
+
+        #[cfg(not(feature = "openvino-whisper"))]
+        {
+            print_failure(&format!(
+                "OpenVINO model '{}' requires the 'openvino-whisper' feature",
+                model_name
+            ));
+            println!("       Rebuild with: cargo build --features openvino-whisper");
+            anyhow::bail!("openvino-whisper feature not enabled");
+        }
+
+        #[cfg(feature = "openvino-whisper")]
+        {
+            let dir_name = model::openvino_dir_name(model_name).unwrap();
+            let model_path = models_dir.join(dir_name);
+            let model_valid =
+                model_path.exists() && model::validate_openvino_model(&model_path).is_ok();
+
+            if model_valid {
+                if !quiet {
+                    let size = std::fs::read_dir(&model_path)
+                        .map(|entries| {
+                            entries
+                                .flatten()
+                                .filter_map(|e| e.metadata().ok())
+                                .map(|m| m.len() as f64 / 1024.0 / 1024.0)
+                                .sum::<f64>()
+                        })
+                        .unwrap_or(0.0);
+                    print_success(&format!("Model ready: {} ({:.0} MB)", model_name, size));
+                }
+                if activate {
+                    model::set_openvino_config(model_name)?;
+                    if !quiet {
+                        print_success(&format!(
+                            "Config updated: engine = \"openvino\", model = \"{}\"",
+                            model_name
+                        ));
+                    }
+                }
+                // A failed first compile leaves valid downloaded IR files in
+                // place, so a --download retry (or activating the model) must
+                // still get a chance at NPU preparation. The compile is
+                // skipped when this model's cache blob already exists.
+                if download || activate {
+                    model::prepare_openvino_model(model_name, config);
+                }
+            } else if download {
+                model::download_openvino_model(model_name)?;
+                if activate {
+                    model::set_openvino_config(model_name)?;
+                    if !quiet {
+                        print_success(&format!(
+                            "Config updated: engine = \"openvino\", model = \"{}\"",
+                            model_name
+                        ));
+                    }
+                }
+                model::prepare_openvino_model(model_name, config);
+            } else if !quiet {
+                print_info(&format!("Model '{}' not downloaded yet", model_name));
+                println!(
+                    "       Run: smellytype setup --download --model {}",
+                    model_name
+                );
+            }
+        }
+    } else if is_sensevoice {
+        // Handle SenseVoice model
+        #[allow(unused_variables)]
+        let model_name = model_override.unwrap(); // Safe: is_sensevoice implies Some
+
+        if !quiet {
+            println!("\nSenseVoice model...");
+        }
+
+        #[cfg(not(feature = "sensevoice"))]
+        {
+            print_failure(&format!(
+                "SenseVoice model '{}' requires the 'sensevoice' feature",
+                model_name
+            ));
+            println!("       Rebuild with: cargo build --features sensevoice");
+            anyhow::bail!("SenseVoice feature not enabled");
+        }
+
+        #[cfg(feature = "sensevoice")]
+        {
+            let dir_name = model::sensevoice_dir_name(model_name).unwrap();
+            let model_path = models_dir.join(dir_name);
+            let model_valid =
+                model_path.exists() && model::validate_sensevoice_model(&model_path).is_ok();
+
+            if model_valid {
+                if !quiet {
+                    let size = std::fs::read_dir(&model_path)
+                        .map(|entries| {
+                            entries
+                                .flatten()
+                                .filter_map(|e| e.metadata().ok())
+                                .map(|m| m.len() as f64 / 1024.0 / 1024.0)
+                                .sum::<f64>()
+                        })
+                        .unwrap_or(0.0);
+                    print_success(&format!("Model ready: {} ({:.0} MB)", model_name, size));
+                }
+            } else if download {
+                model::download_sensevoice_model(model_name)?;
+            } else if !quiet {
+                print_info(&format!("Model '{}' not downloaded yet", model_name));
+                println!(
+                    "       Run: smellytype setup --download --model {}",
+                    model_name
+                );
+            }
+        }
+    } else if is_parakeet {
+        // Handle Parakeet model
+        #[allow(unused_variables)]
+        let model_name = model_override.unwrap(); // Safe: is_parakeet implies Some
+
+        if !quiet {
+            println!("\nParakeet model...");
+        }
+
+        // Check if parakeet feature is enabled
+        #[cfg(not(feature = "parakeet"))]
+        {
+            print_failure(&format!(
+                "Parakeet model '{}' requires the 'parakeet' feature",
+                model_name
+            ));
+            println!("       Rebuild with: cargo build --features parakeet");
+            anyhow::bail!("Parakeet feature not enabled");
+        }
+
+        #[cfg(feature = "parakeet")]
+        {
+            let model_path = models_dir.join(model_name);
+            let model_valid =
+                model_path.exists() && model::validate_parakeet_model(&model_path).is_ok();
+
+            if model_valid {
+                if !quiet {
+                    let size = std::fs::read_dir(&model_path)
+                        .map(|entries| {
+                            entries
+                                .flatten()
+                                .filter_map(|e| e.metadata().ok())
+                                .map(|m| m.len() as f64 / 1024.0 / 1024.0)
+                                .sum::<f64>()
+                        })
+                        .unwrap_or(0.0);
+                    print_success(&format!("Model ready: {} ({:.0} MB)", model_name, size));
+                }
+                if activate {
+                    model::set_parakeet_config(model_name)?;
+                    if !quiet {
+                        print_success(&format!(
+                            "Config updated: engine = \"parakeet\", model = \"{}\"",
+                            model_name
+                        ));
+                    }
+                }
+            } else if download {
+                model::download_parakeet_model(model_name)?;
+                if activate {
+                    model::set_parakeet_config(model_name)?;
+                    if !quiet {
+                        print_success(&format!(
+                            "Config updated: engine = \"parakeet\", model = \"{}\"",
+                            model_name
+                        ));
+                    }
+                }
+            } else if !quiet {
+                print_info(&format!("Model '{}' not downloaded yet", model_name));
+                println!(
+                    "       Run: smellytype setup --download --model {}",
+                    model_name
+                );
+            }
+        }
+    } else {
+        // Handle Whisper model
+        if !quiet {
+            println!("\nWhisper model...");
+        }
+
+        // An override reaching here is already a known Whisper name; the
+        // config default is taken as-is, since it may be a path to a .bin.
+        let model_name: &str = model_override.unwrap_or(&config.whisper.model);
+
+        let model_filename = crate::transcribe::whisper::get_model_filename(model_name);
+        let model_path = models_dir.join(&model_filename);
+
+        // Existence isn't enough: a file left by an interrupted download from
+        // an older smellytype (or an error page saved under the model's name)
+        // must not read as ready, or `--download` would refuse to replace the
+        // very file the user is trying to repair. The ONNX branches already
+        // gate on their per-engine validators.
+        let damaged = if model_path.exists() {
+            model::validate_download(&model_path, None, model::ContentCheck::Ggml).err()
+        } else {
+            None
+        };
+
+        if model_path.exists() && damaged.is_none() {
+            let bytes = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+            if !quiet {
+                let size = bytes as f64 / 1024.0 / 1024.0;
+                print_success(&format!("Model ready: {} ({:.0} MB)", model_name, size));
+            }
+            // Report the existing file as complete so a progress bar driven by
+            // these events finishes rather than jumping straight to `done`.
+            progress::file_already_complete(model_name, &model_filename, bytes);
+            if activate {
+                model::set_model_config(model_name)?;
+                if !quiet {
+                    print_success(&format!("Config updated to use '{}'", model_name));
+                }
+            }
+        } else if download {
+            if !quiet {
+                if let Some(problem) = &damaged {
+                    print_warning(&format!(
+                        "Existing '{}' is damaged ({}); replacing it",
+                        model_name, problem
+                    ));
+                }
+                println!("  Downloading {}...", model_name);
+            }
+            model::download_model(model_name)?;
+            if activate {
+                model::set_model_config(model_name)?;
+                if !quiet {
+                    print_success(&format!("Config updated to use '{}'", model_name));
+                }
+            }
+        } else {
+            if let Some(problem) = &damaged {
+                left_damaged = true;
+                if !quiet {
+                    print_failure(&format!("Model '{}' is damaged: {}", model_name, problem));
+                    // A custom path isn't something --download can fetch.
+                    if model::is_valid_model(model_name) {
+                        println!(
+                            "       Replace it with: smellytype setup --download --model {}",
+                            model_name
+                        );
+                    } else {
+                        println!("       Replace the file, or point [whisper] model at a model smellytype can download.");
+                    }
+                }
+            } else if !quiet {
+                print_info(&format!("Model '{}' not downloaded yet", model_name));
+                println!("       Run: smellytype setup --download");
+            }
+        }
+    }
+
+    // Summary
+    if !quiet {
+        println!("\n---");
+        if left_damaged {
+            // Don't call a run that ended with an unusable model a success.
+            println!("\x1b[33m⚠ Setup finished, but the configured model needs replacing.\x1b[0m");
+        } else {
+            println!("\x1b[32m✓ Setup complete!\x1b[0m");
+        }
+    }
+
+    // Show next steps unless --quiet or --no-post-install is passed
+    if !quiet && !no_post_install {
+        println!();
+        println!("Next steps:");
+
+        #[cfg(target_os = "macos")]
+        {
+            println!("  1. Install as app bundle (recommended):");
+            println!("     smellytype setup app-bundle\n");
+            println!("  2. Or run the interactive setup wizard:");
+            println!("     smellytype setup macos\n");
+            println!("Optional:");
+            println!("  smellytype setup check             - Verify system configuration");
+            println!("  smellytype setup model             - Download/switch whisper models");
+            println!("  smellytype setup app-bundle --status - Check installation status");
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            println!("  1. Set up a compositor keybinding to trigger recording:");
+            println!(
+                "     Example for Hyprland: bind = , XF86AudioRecord, exec, smellytype record-toggle\n"
+            );
+            println!("  2. Start the daemon: smellytype daemon\n");
+            println!("Optional:");
+            println!("  smellytype setup check      - Verify system configuration");
+            println!("  smellytype setup model      - Download/switch whisper models");
+            println!("  smellytype setup systemd    - Install as systemd service");
+            println!("  smellytype setup waybar     - Get Waybar integration config");
+            println!(
+                "  smellytype setup compositor - Fix modifier key issues (Hyprland/Sway/River)"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Run system checks (blocking, shows red X for failures)
+pub async fn run_checks(config: &Config) -> anyhow::Result<()> {
+    println!("SmellyType System Check\n");
+    println!("====================\n");
+
+    let mut all_ok = true;
+
+    // Check CPU compatibility
+    println!("CPU:");
+    if let Some(warning) = crate::cpu::check_cpu_compatibility() {
+        print_warning(&warning);
+    } else {
+        print_success("CPU features compatible");
+    }
+    if crate::cpu::is_running_in_vm() {
+        print_info("Running in a virtual machine - ensure CPU features are passed through");
+    }
+
+    // Check directories
+    println!("Directories:");
+    if let Some(config_dir) = Config::config_dir() {
+        if config_dir.exists() {
+            print_success(&format!("Config directory: {:?}", config_dir));
+        } else {
+            print_failure(&format!("Config directory missing: {:?}", config_dir));
+            println!("       Run: smellytype setup");
+            all_ok = false;
+        }
+    }
+
+    let models_dir = Config::models_dir();
+    if models_dir.exists() {
+        print_success(&format!("Models directory: {:?}", models_dir));
+    } else {
+        print_failure(&format!("Models directory missing: {:?}", models_dir));
+        println!("       Run: smellytype setup");
+        all_ok = false;
+    }
+
+    // Check config file
+    if let Some(config_path) = Config::default_path() {
+        if config_path.exists() {
+            print_success(&format!("Config file: {:?}", config_path));
+        } else {
+            print_failure(&format!("Config file missing: {:?}", config_path));
+            println!("       Run: smellytype setup");
+            all_ok = false;
+        }
+    }
+
+    // Check input group
+    println!("\nInput:");
+    if user_in_group("input") {
+        print_success(
+            "User is in 'input' group (evdev hotkeys + modifier-release guard available)",
+        );
+    } else {
+        print_warning("User is not in 'input' group");
+        println!("       evdev hotkeys: unavailable");
+        println!("       Modifier-release guard: unavailable");
+        println!("         (typed text may trigger keybindings if the hotkey is released late)");
+        println!("       Required only for evdev hotkey mode, not compositor keybindings");
+        println!("       To enable: sudo usermod -aG input $USER && logout");
+    }
+
+    // Check output chain
+    let output_status = detect_output_chain().await;
+    print_output_chain_status(&output_status);
+
+    if output_status.primary_method.is_none() {
+        print_failure("No text output method available");
+        if output_status.display_server == DisplayServer::Wayland {
+            println!("       Install wtype: sudo pacman -S wtype");
+            println!("       Or eitype:     cargo install eitype");
+        } else {
+            println!("       Install ydotool: sudo pacman -S ydotool");
+        }
+        all_ok = false;
+    } else if output_status.primary_method.as_deref() == Some("clipboard") {
+        print_warning("Only clipboard mode available - typing won't work");
+        if output_status.display_server == DisplayServer::Wayland {
+            println!("       Install wtype: sudo pacman -S wtype");
+            println!("       Or eitype:     cargo install eitype");
+        } else {
+            println!("       Install ydotool: sudo pacman -S ydotool");
+        }
+    }
+
+    // Check whisper model (only if using Whisper engine)
+    if config.engine == crate::config::TranscriptionEngine::Whisper {
+        println!("\nWhisper Model:");
+        let model_name = &config.whisper.model;
+        let model_filename = crate::transcribe::whisper::get_model_filename(model_name);
+        let model_path = models_dir.join(&model_filename);
+
+        let size = std::fs::metadata(&model_path)
+            .map(|m| m.len() as f64 / 1024.0 / 1024.0)
+            .unwrap_or(0.0);
+        if crate::model_catalog::model_installed("whisper", model_name) {
+            print_success(&format!(
+                "Model '{}' installed ({:.0} MB)",
+                model_name, size
+            ));
+        } else if model_path.exists() {
+            // Present but short: an interrupted download used to be reported
+            // as installed, then failed to load at runtime.
+            print_failure(&format!(
+                "Model '{}' is incomplete ({:.0} MB on disk)",
+                model_name, size
+            ));
+            println!(
+                "       Run: smellytype setup --download --model {}",
+                model_name
+            );
+            all_ok = false;
+        } else {
+            print_failure(&format!("Model '{}' not found", model_name));
+            println!("       Run: smellytype setup --download");
+            all_ok = false;
+        }
+    } else {
+        println!("\nWhisper Model:");
+        print_info("Using Parakeet engine (Whisper model not required)");
+    }
+
+    // Check Parakeet models
+    println!("\nParakeet Models:");
+
+    // Find available Parakeet models
+    let mut parakeet_models: Vec<(String, u64)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&models_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.contains("parakeet") {
+                    // Check if it has the required ONNX files (including quantized variants)
+                    let has_encoder = path.join("encoder-model.onnx").exists()
+                        || path.join("encoder-model.int8.onnx").exists();
+                    let has_decoder = path.join("decoder_joint-model.onnx").exists()
+                        || path.join("decoder_joint-model.int8.onnx").exists()
+                        || path.join("model.onnx").exists();
+                    if has_encoder || has_decoder {
+                        // Get total size of model files
+                        let size = std::fs::read_dir(&path)
+                            .map(|entries| {
+                                entries
+                                    .flatten()
+                                    .filter_map(|e| e.metadata().ok())
+                                    .map(|m| m.len())
+                                    .sum()
+                            })
+                            .unwrap_or(0);
+                        parakeet_models.push((name, size));
+                    }
+                }
+            }
+        }
+    }
+
+    if parakeet_models.is_empty() {
+        print_info("No Parakeet models found");
+        println!("       See docs/PARAKEET.md for download instructions");
+    } else {
+        for (name, size) in &parakeet_models {
+            let size_mb = *size as f64 / 1024.0 / 1024.0;
+            print_success(&format!("Model '{}' installed ({:.0} MB)", name, size_mb));
+        }
+    }
+
+    // Check OpenVINO models
+    println!("\nOpenVINO Whisper Models:");
+
+    let mut openvino_models: Vec<(String, u64)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&models_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("openvino-whisper")
+                    && model::validate_openvino_model(&path).is_ok()
+                {
+                    let size = std::fs::read_dir(&path)
+                        .map(|entries| {
+                            entries
+                                .flatten()
+                                .filter_map(|e| e.metadata().ok())
+                                .map(|m| m.len())
+                                .sum()
+                        })
+                        .unwrap_or(0);
+                    openvino_models.push((name, size));
+                }
+            }
+        }
+    }
+
+    if openvino_models.is_empty() {
+        print_info("No OpenVINO models found");
+        println!("       Download with: smellytype setup --download --model base.en-int8");
+    } else {
+        for (name, size) in &openvino_models {
+            let size_mb = *size as f64 / 1024.0 / 1024.0;
+            print_success(&format!("Model '{}' installed ({:.0} MB)", name, size_mb));
+        }
+    }
+
+    // Check if OpenVINO is configured but model is missing
+    if config.engine == crate::config::TranscriptionEngine::OpenVino {
+        if let Some(ref openvino_config) = config.openvino {
+            let configured_model = &openvino_config.model;
+            // Resolve the dir name for the configured model
+            let dir_name = model::openvino_dir_name(configured_model);
+            let model_found = match dir_name {
+                Some(dir) => openvino_models.iter().any(|(name, _)| name == dir),
+                None => false,
+            };
+            if !model_found {
+                print_failure(&format!(
+                    "Configured OpenVINO model '{}' not found",
+                    configured_model
+                ));
+                println!(
+                    "       Download with: smellytype setup --download --model {}",
+                    configured_model
+                );
+                all_ok = false;
+            }
+        } else {
+            print_failure("Engine set to 'openvino' but [openvino] config section is missing");
+            all_ok = false;
+        }
+    }
+
+    // Check if Parakeet is configured but model is missing
+    if config.engine == crate::config::TranscriptionEngine::Parakeet {
+        if let Some(ref parakeet_config) = config.parakeet {
+            let configured_model = &parakeet_config.model;
+            let model_found = parakeet_models
+                .iter()
+                .any(|(name, _)| name == configured_model);
+            if !model_found {
+                print_failure(&format!(
+                    "Configured Parakeet model '{}' not found",
+                    configured_model
+                ));
+                println!("       Download the model or change config to use an available model");
+                all_ok = false;
+            }
+        } else {
+            print_failure("Engine set to 'parakeet' but [parakeet] config section is missing");
+            all_ok = false;
+        }
+    }
+
+    // Summary
+    println!("\n---");
+    if all_ok {
+        println!("\x1b[32m✓ All checks passed!\x1b[0m");
+    } else {
+        println!("\x1b[31m✗ Some checks failed.\x1b[0m Please fix the issues above.");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `small` is in both the Whisper and SenseVoice tables. Whisper has to
+    /// win, or `setup --download --model small` can never fetch Whisper small.
+    #[test]
+    fn whisper_wins_colliding_model_names() {
+        assert!(model::is_sensevoice_model("small"));
+        assert_eq!(
+            classify_model_override("small").unwrap(),
+            ModelKind::Whisper
+        );
+        assert_eq!(
+            classify_model_override("small.en").unwrap(),
+            ModelKind::Whisper
+        );
+    }
+
+    #[test]
+    fn sensevoice_models_stay_reachable_under_their_directory_name() {
+        assert_eq!(
+            classify_model_override("sensevoice-small").unwrap(),
+            ModelKind::SenseVoice
+        );
+        assert_eq!(
+            classify_model_override("sensevoice-small-fp32").unwrap(),
+            ModelKind::SenseVoice
+        );
+        // `small-fp32` doesn't collide with anything, so the short form works.
+        assert_eq!(
+            classify_model_override("small-fp32").unwrap(),
+            ModelKind::SenseVoice
+        );
+        assert_eq!(
+            model::sensevoice_dir_name("sensevoice-small"),
+            Some("sensevoice-small")
+        );
+    }
+
+    #[test]
+    fn parakeet_models_classify_as_parakeet() {
+        let name = model::valid_parakeet_model_names()[0];
+        assert_eq!(
+            classify_model_override(name).unwrap(),
+            ModelKind::Parakeet,
+            "{}",
+            name
+        );
+    }
+
+    /// Whatever `smellytype info models` advertises as a download argument has to
+    /// fetch that engine's model, not a same-named model from another engine.
+    ///
+    /// This is the invariant a GUI depends on: it lists models from
+    /// `info models --json` and hands `download_arg` straight to
+    /// `setup --download --model`. SenseVoice is the reason the field exists —
+    /// its catalog names (`small`) are Whisper model names too.
+    #[test]
+    fn advertised_download_args_resolve_to_their_own_engine() {
+        for engine in crate::model_catalog::CATALOG_ENGINES {
+            for model in crate::model_catalog::model_catalog(engine) {
+                let Some(arg) = crate::model_catalog::download_arg(engine, model) else {
+                    continue;
+                };
+                let expected = match *engine {
+                    "whisper" => ModelKind::Whisper,
+                    "parakeet" => ModelKind::Parakeet,
+                    "sensevoice" => ModelKind::SenseVoice,
+                    "openvino" => ModelKind::OpenVino,
+                    other => panic!(
+                        "'{}' advertises a download argument but run_setup has no branch for it",
+                        other
+                    ),
+                };
+                let got = classify_model_override(&arg).unwrap_or_else(|e| {
+                    panic!("{} model '{}' advertises '{}': {}", engine, model, arg, e)
+                });
+                assert_eq!(
+                    got, expected,
+                    "{} model '{}' advertises '{}', which downloads a {:?} model",
+                    engine, model, arg, got
+                );
+            }
+        }
+    }
+
+    /// A plain model name must fetch that exact model. Quantized variants are
+    /// separate catalog entries, never aliases reached by a plain name.
+    #[test]
+    fn quantized_variants_are_distinct_entries_not_aliases() {
+        let names = model::valid_parakeet_model_names();
+        assert!(names.contains(&"parakeet-tdt-0.6b-v2"), "{:?}", names);
+        assert!(names.contains(&"parakeet-tdt-0.6b-v2-int8"), "{:?}", names);
+
+        for name in &names {
+            // A registry entry keyed by the catalog name is what makes the
+            // files land in a directory of that name.
+            assert!(
+                !model::expected_file_names("parakeet", name).is_empty(),
+                "no registry entry for '{}'",
+                name
+            );
+            assert_eq!(
+                crate::model_catalog::model_dir_name("parakeet", name),
+                *name,
+                "'{}' would install under a different directory",
+                name
+            );
+        }
+
+        assert_ne!(
+            model::expected_file_names("parakeet", "parakeet-tdt-0.6b-v2"),
+            model::expected_file_names("parakeet", "parakeet-tdt-0.6b-v2-int8"),
+            "plain and int8 must not share a file list"
+        );
+    }
+
+    /// Moonshine and SenseVoice keep short config values while their files
+    /// live under a prefixed directory. Looking in the wrong place made
+    /// installed models report as missing.
+    #[test]
+    fn short_config_names_map_to_prefixed_directories() {
+        assert_eq!(
+            crate::model_catalog::model_dir_name("moonshine", "base"),
+            "moonshine-base"
+        );
+        assert_eq!(
+            crate::model_catalog::model_dir_name("sensevoice", "small"),
+            "sensevoice-small"
+        );
+        // Engines whose catalog names are already directory names.
+        assert_eq!(
+            crate::model_catalog::model_dir_name("dolphin", "dolphin-base"),
+            "dolphin-base"
+        );
+    }
+
+    /// A name no engine claims must fail rather than fall through to whisper,
+    /// where it would become a download for a nonexistent file.
+    #[test]
+    fn unknown_model_names_are_rejected() {
+        let err = classify_model_override("gargantuan-v9")
+            .expect_err("unknown model should be an error")
+            .to_string();
+        assert!(err.contains("Unknown model 'gargantuan-v9'"), "{}", err);
+        assert!(err.contains("large-v3-turbo"), "{}", err);
+    }
+}
