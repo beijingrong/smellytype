@@ -55,6 +55,7 @@ impl DoubaoTranscriber {
                 "Doubao final_timeout_secs must be between 1 and 300".into(),
             ));
         }
+        vocabulary(&config.hotwords)?;
         Ok(Self { config })
     }
 
@@ -134,14 +135,48 @@ impl StreamingTranscriber for DoubaoTranscriber {
     }
 }
 
-fn init_payload() -> Value {
-    json!({
+// Deliberately keep a small personal vocabulary, not a general text prompt.
+fn vocabulary(raw: &str) -> Result<Vec<String>> {
+    if raw.len() > 4096 {
+        return Err(failure("hotwords must fit within 4096 UTF-8 bytes"));
+    }
+    let mut words = Vec::new();
+    for line in raw.lines() {
+        let word = line.trim();
+        if word.is_empty() {
+            continue;
+        }
+        if word.chars().count() > 64 || word.chars().any(char::is_control) {
+            return Err(failure(
+                "each hotword must have at most 64 characters and no control characters",
+            ));
+        }
+        if !words.iter().any(|existing| existing == word) {
+            words.push(word.to_string());
+        }
+    }
+    if words.len() > 50 {
+        return Err(failure("use at most 50 personal hotwords"));
+    }
+    Ok(words)
+}
+
+fn init_payload(config: &DoubaoConfig) -> Result<Value> {
+    let mut payload = json!({
         "user": {"uid": "smellytype"},
         "audio": {"format": "pcm", "codec": "raw", "rate": 16000, "bits": 16, "channel": 1},
         "request": {"model_name": "bigmodel", "enable_nonstream": true,
             "enable_itn": true, "enable_punc": true, "show_utterances": true,
-            "result_type": "full"}
-    })
+            "enable_ddc": config.enable_ddc, "result_type": "full"}
+    });
+    let words = vocabulary(&config.hotwords)?;
+    if !words.is_empty() {
+        // corpus.context is a JSON-encoded STRING, not a nested object.
+        payload["request"]["corpus"] = json!({"context": json!({
+            "hotwords": words.iter().map(|word| json!({"word": word})).collect::<Vec<_>>()
+        }).to_string()});
+    }
+    Ok(payload)
 }
 
 fn encode(kind: u8, sequence: i32, data: &[u8]) -> Result<Vec<u8>> {
@@ -284,7 +319,7 @@ async fn run_session(
         ws.send(Message::Binary(encode(
             1,
             1,
-            &serde_json::to_vec(&init_payload()).map_err(failure)?,
+            &serde_json::to_vec(&init_payload(config)?).map_err(failure)?,
         )?)),
     )
     .await
@@ -367,6 +402,44 @@ async fn run_session(
 mod tests {
     use super::*;
 
+    #[test]
+    fn personal_vocabulary_is_json_string_and_smoothing_is_explicit() {
+        let config = DoubaoConfig {
+            hotwords: " SmellyType \n红楼梦\nSmellyType\nA \"quote\"\n".into(),
+            enable_ddc: true,
+            ..Default::default()
+        };
+        let payload = init_payload(&config).unwrap();
+        assert_eq!(payload["request"]["enable_ddc"], true);
+        let context: Value =
+            serde_json::from_str(payload["request"]["corpus"]["context"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(
+            context,
+            json!({"hotwords": [{"word":"SmellyType"}, {"word":"红楼梦"}, {"word":"A \"quote\""}]})
+        );
+        let defaults = init_payload(&DoubaoConfig::default()).unwrap();
+        assert_eq!(defaults["request"]["enable_ddc"], false);
+        assert!(defaults["request"].get("corpus").is_none());
+        assert!(!format!("{config:?}").contains("SmellyType"));
+    }
+
+    #[test]
+    fn vocabulary_rejects_oversize_and_control_characters_without_echoing_words() {
+        for raw in [
+            "x".repeat(65),
+            "x".repeat(4097),
+            "private\u{1b}word".into(),
+            (0..51)
+                .map(|n| format!("word{n}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ] {
+            assert!(vocabulary(&raw).is_err());
+        }
+        assert!(vocabulary(" \n ").unwrap().is_empty());
+    }
+
     fn backend() -> DoubaoTranscriber {
         DoubaoTranscriber::new(DoubaoConfig {
             api_key: Some("test-secret".into()),
@@ -399,9 +472,17 @@ mod tests {
             .read_to_end(&mut pcm)
             .unwrap();
         assert_eq!(pcm, [0, 128, 0, 0, 255, 127, 0, 0]);
-        let init = encode(1, 1, &serde_json::to_vec(&init_payload()).unwrap()).unwrap();
+        let init = encode(
+            1,
+            1,
+            &serde_json::to_vec(&init_payload(&DoubaoConfig::default()).unwrap()).unwrap(),
+        )
+        .unwrap();
         assert_eq!(&init[..4], &[0x11, 0x11, 0x11, 0]);
-        assert_eq!(init_payload()["request"]["enable_nonstream"], true);
+        assert_eq!(
+            init_payload(&DoubaoConfig::default()).unwrap()["request"]["enable_nonstream"],
+            true
+        );
     }
 
     #[test]

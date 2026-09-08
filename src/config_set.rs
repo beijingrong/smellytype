@@ -280,6 +280,27 @@ mod tests {
     }
 
     #[test]
+    fn personal_vocabulary_roundtrip_and_clear_preserve_other_settings() {
+        let (_dir, path) = temp_config("# keep this comment\nengine = \"doubao\"\n[audio]\nmax_duration_secs = 300\n[doubao]\nfinal_timeout_secs = 120\n");
+        set_key(path.clone(), "doubao.hotwords", "SmellyType\n红楼梦").unwrap();
+        set_key(path.clone(), "doubao.enable_ddc", "true").unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let config: crate::config::Config = toml::from_str(&text).unwrap();
+        assert_eq!(
+            config.doubao.as_ref().unwrap().hotwords,
+            "SmellyType\n红楼梦"
+        );
+        assert!(config.doubao.as_ref().unwrap().enable_ddc);
+        assert_eq!(config.audio.max_duration_secs, 300);
+        assert_eq!(config.doubao.as_ref().unwrap().final_timeout_secs, 120);
+        assert!(text.contains("# keep this comment"));
+        set_key(path.clone(), "doubao.hotwords", "").unwrap();
+        let config: crate::config::Config =
+            toml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert!(config.doubao.unwrap().hotwords.is_empty());
+    }
+
+    #[test]
     fn parse_engine_accepts_known_names() {
         for engine in TranscriptionEngine::iter() {
             let name = engine.name();

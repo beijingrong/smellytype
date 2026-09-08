@@ -23,9 +23,11 @@ BarWidget {
         popup.item.hostWidget = root
     }
     function refresh() { if (!poll.running) poll.running = true }
-    function act(args) {
+    property string actionInput: ""
+    function act(args, input) {
         if (action.running) return
         message = ""
+        actionInput = input === undefined ? "" : JSON.stringify(input) + "\n"
         action.command = ["python3", bridge].concat(args)
         action.running = true
     }
@@ -42,6 +44,8 @@ BarWidget {
     }
     Process {
         id: action
+        stdinEnabled: true
+        onStarted: { if (root.actionInput.length) write(root.actionInput); root.actionInput = "" }
         stdout: StdioCollector { onStreamFinished: {
             try { const value = JSON.parse(text); root.message = value.ok ? (value.message || "") : value.error }
             catch (_) { root.message = "操作未完成" }

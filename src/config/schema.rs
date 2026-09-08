@@ -809,6 +809,10 @@ pub const CONFIG_KEYS: &[KeySpec] = &[
         "Doubao final response wait",
         "Maximum wait in seconds after audio ends for final recognition.",
     ).for_engine("doubao"),
+    spec("doubao.enable_ddc", "doubao", "enable_ddc", KeyType::Bool,
+        "Engine", "Doubao speech cleanup", "Remove disfluencies; may also remove expressive fillers.").for_engine("doubao"),
+    spec("doubao.hotwords", "doubao", "hotwords", KeyType::String,
+        "Engine", "Doubao personal vocabulary", "One word per line, up to 50 words and 4096 UTF-8 bytes. Sent to Doubao.").for_engine("doubao"),
     // -- Audio --------------------------------------------------------------
     spec(
         "audio.device",
@@ -1540,7 +1544,7 @@ pub fn validate_value(spec: &KeySpec, raw: &str) -> Result<TypedValue, ValueErro
             })
         }
         KeyType::String | KeyType::DynamicEnum { .. } | KeyType::MapString => {
-            if raw.is_empty() {
+            if raw.is_empty() && spec.key != "doubao.hotwords" {
                 return Err(ValueError::Empty { key: spec.key });
             }
             Ok(TypedValue::Str(raw.to_string()))
@@ -1744,6 +1748,8 @@ pub fn resolve(key: &str, cfg: &Config) -> Option<Json> {
         "doubao.final_timeout_secs" => {
             json!(cfg.doubao.clone().unwrap_or_default().final_timeout_secs)
         }
+        "doubao.enable_ddc" => json!(cfg.doubao.clone().unwrap_or_default().enable_ddc),
+        "doubao.hotwords" => json!(cfg.doubao.clone().unwrap_or_default().hotwords),
         "audio.pause_media" => json!(cfg.audio.pause_media),
         "audio.duck_media" => json!(cfg.audio.duck_media),
         "audio.duck_media_volume_percent" => json!(cfg.audio.duck_media_volume_percent),

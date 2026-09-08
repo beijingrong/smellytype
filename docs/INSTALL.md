@@ -107,3 +107,9 @@ shared daemon FIFO. Text containing control characters is rejected by that
 driver before output; the configured fallback chain may deliver it through
 another backend, such as the clipboard. This can increase dotool startup latency.
 The default wtype path remains available.
+
+## Vocabulary and cleanup (core 0.1.2+, panel 0.1.9+)
+
+The panel edits `[doubao] hotwords` (a newline-separated TOML string) and `enable_ddc` (boolean, default false). Empty vocabulary disables hints. Keep personal words in the user's config, never in the public repository. Defaults do not prepopulate personal terms. Client limits are 50 unique terms, 64 characters per term and 4096 UTF-8 bytes. The provider may impose additional context limits; place important terms first.
+
+Official protocol: https://docs.volcengine.com/docs/6561/2630027 — `request.enable_ddc` and JSON-string `request.corpus.context` containing `hotwords`. Existing second-pass recognition remains enabled. These features use the existing ASR request, not a separate text-generation service.

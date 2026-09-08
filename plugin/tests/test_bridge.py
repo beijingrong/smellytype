@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -24,6 +25,26 @@ class BridgeTests(unittest.TestCase):
         bridge.CONFIG.write_text('[audio]\nmax_duration_secs = 180\n')
         (root/'state').write_text('idle')
         (root/'pid').write_text(str(os.getpid()))
+
+    def test_hotwords_normalized_and_clearable(self):
+        for value, expected in [(' SmellyType \n红楼梦\nSmellyType', 'SmellyType\n红楼梦'), ('', '')]:
+            with patch.object(bridge.sys, 'stdin', io.StringIO(json.dumps(value)+'\n')), patch.object(bridge, 'run') as run:
+                bridge.main(['hotwords'])
+                self.assertEqual(run.call_args_list[0].args[-2:], ('doubao.hotwords', expected))
+        with self.assertRaises(ValueError): bridge.validate_hotwords('x'*65)
+        with self.assertRaises(ValueError): bridge.validate_hotwords('bad\x1bword')
+        with self.assertRaises(ValueError): bridge.validate_hotwords('\n'.join(str(i) for i in range(51)))
+
+    def test_cleanup_boolean_and_busy_guard(self):
+        with patch.object(bridge, 'run') as run:
+            bridge.main(['cleanup', 'true'])
+            self.assertEqual(run.call_args_list[0].args[-2:], ('doubao.enable_ddc', 'true'))
+            run.reset_mock()
+            with self.assertRaises(ValueError): bridge.main(['cleanup', 'yes'])
+            (bridge.RUNTIME/'state').write_text('transcribing')
+            with self.assertRaises(ValueError): bridge.main(['cleanup', 'false'])
+            with self.assertRaises(ValueError): bridge.main(['hotwords'])
+            run.assert_not_called()
 
     def test_timeout_targets_cloud_field_and_rejects_invalid_values(self):
         with patch.object(bridge, 'run') as run:

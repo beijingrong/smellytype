@@ -7,7 +7,7 @@ An Omarchy Quattro bar plugin for [SmellyType](https://github.com/beijingrong/sm
 ## Requirements
 
 - Omarchy's Quickshell-based Shell (Quattro plugin API), Python 3.11+.
-- SmellyType 0.1.1 or newer, installed and configured with an active user service.
+- SmellyType 0.1.2 or newer, installed and configured with an active user service.
 - For key replacement: `xdg-terminal-exec` and a configured terminal.
 
 **This plugin is the desktop control panel, not the speech engine.** If SmellyType is missing, the panel shows installation guidance. Give your Agent https://github.com/beijingrong/smellytype and ask it to follow `AGENTS.md`. Its installer builds the core and includes this panel, so you do not need to install both copies.
@@ -39,6 +39,7 @@ Click the cat button to open the panel; Escape closes it. F9 still belongs to th
 - Final-response wait after audio ends: 30, 60, 120 or 300 seconds.
 - Cumulative microphone time and session count, persisted by SmellyType.
 - Service status/restart and private terminal API-key entry.
+- Personal vocabulary (one term per line, sent to Doubao with each recording) and optional speech cleanup. Vocabulary hints are not guaranteed corrections; cleanup may remove expressive fillers.
 
 Settings restart `smellytype.service` only while idle and restore prior settings on failure. Service command-line/environment overrides may take precedence over config values. Key replacement uses hidden terminal input and mode-0600 files; keys never enter QML. File presence does not verify cloud authentication.
 

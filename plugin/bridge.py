@@ -41,6 +41,8 @@ def status():
         except (ProcessLookupError, ValueError, KeyError): pass
     elapsed = max(0, int(time.time()*1000) - int(active.get('started_ms', 0))) if recording else 0
     return {'ok': True, 'state': state, 'recording': recording,
+            'hotwords': cfg.get('doubao', {}).get('hotwords', ''),
+            'enable_ddc': cfg.get('doubao', {}).get('enable_ddc', False),
             'final_timeout': cfg.get('doubao', {}).get('final_timeout_secs', 60),
             'key_configured': CONFIG.with_name('doubao.env').is_file(),
             'limit': cfg.get('audio', {}).get('max_duration_secs', 60),
@@ -51,25 +53,43 @@ def status():
 def run(*args):
     subprocess.run(args, check=True, capture_output=True, text=True, timeout=15)
 
+def validate_hotwords(raw):
+    if not isinstance(raw, str) or len(raw.encode('utf-8')) > 4096:
+        raise ValueError('词库最多 4096 字节，请只保留常用词')
+    words = list(dict.fromkeys(line.strip() for line in raw.splitlines() if line.strip()))
+    if len(words) > 50 or any(len(word) > 64 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in word) for word in words):
+        raise ValueError('最多 50 个词，每词最多 64 字，不能包含控制字符')
+    return '\n'.join(words)
+
 def main(argv):
     action = argv[0] if argv else 'status'
     if action == 'status': return status()
     current = status()
     if not current['installed'] or not current['configured']:
         raise ValueError('请先安装并配置 SmellyType：github.com/beijingrong/smellytype')
-    if action in ('limit', 'timeout'):
+    if action in ('limit', 'timeout', 'cleanup', 'hotwords'):
         if current['state'] != 'idle': raise ValueError('请先结束录音并等待识别完成')
-        seconds = int(argv[1])
-        if action == 'limit' and not 5 <= seconds <= 900: raise ValueError('时长必须在 5–900 秒之间')
-        if action == 'timeout' and not 1 <= seconds <= 300: raise ValueError('等待时间必须在 1–300 秒之间')
-        field = 'audio.max_duration_secs' if action == 'limit' else 'doubao.final_timeout_secs'
+        if action == 'hotwords':
+            # Read vocabulary over stdin so it never appears in the panel's command line.
+            raw = json.loads(sys.stdin.readline(32769))
+            value = validate_hotwords(raw)
+            field = 'doubao.hotwords'
+        elif action == 'cleanup':
+            if argv[1] not in ('true', 'false'): raise ValueError('口语整理设置无效')
+            value, field = argv[1], 'doubao.enable_ddc'
+        else:
+            seconds = int(argv[1])
+            if action == 'limit' and not 5 <= seconds <= 900: raise ValueError('时长必须在 5–900 秒之间')
+            if action == 'timeout' and not 1 <= seconds <= 300: raise ValueError('等待时间必须在 1–300 秒之间')
+            field = 'audio.max_duration_secs' if action == 'limit' else 'doubao.final_timeout_secs'
+            value = str(seconds)
         before = CONFIG.read_bytes()
         import shutil
         backup = CONFIG.with_name('config.toml.before-plugin-' + action)
         shutil.copy2(CONFIG, backup)
         restarted = False
         try:
-            run(str(BINARY), '--config', str(CONFIG), 'config', 'set', field, str(seconds))
+            run(str(BINARY), '--config', str(CONFIG), 'config', 'set', field, value)
             if status()['state'] != 'idle':
                 raise ValueError('录音已开始，本次设置未应用')
             restarted = True

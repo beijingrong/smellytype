@@ -21,7 +21,7 @@ Give your Agent this prompt:
 
 You need an Omarchy / Hyprland environment with Quickshell, an internet connection, and a Volcengine API key with Doubao streaming speech recognition enabled. Enter the key locally; do not share it in chat or commit it to the repository.
 
-The current release is **0.1.1 preview**, installed by building from source. See the [installation guide](docs/INSTALL.md) for dependencies, installation, updates and migration. You do not need to install Voxtype separately or download a local speech model.
+The current release is **0.1.2 preview**, installed by building from source. See the [installation guide](docs/INSTALL.md) for dependencies, installation, updates and migration. You do not need to install Voxtype separately or download a local speech model.
 
 The installer includes the control panel. Existing SmellyType users can also install and update the plugin separately through [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype). Click the cat button in the status bar or open **SmellyType Configuration** to access the panel.
 
@@ -36,3 +36,9 @@ The installer includes the control panel. Existing SmellyType users can also ins
 Voxtype is the code foundation of SmellyType. We retain its original MIT copyright notice and continue to publish under the **MIT** license. See [LICENSE](LICENSE), [source and modification notices](NOTICE), and [third-party notices](THIRD_PARTY.md). This project is independently maintained and is not officially affiliated with Voxtype, Omarchy or Volcengine.
 
 If you prefer local speech models, please explore and support the upstream project, **[Voxtype](https://github.com/peteonrails/voxtype)**.
+
+## Personal vocabulary and speech cleanup
+
+In the cat panel, choose **个人词库 · 编辑** (Edit personal vocabulary). Enter one term per line and save while idle. Clear and save to remove all hints. Client limits: 50 terms, 64 characters each, and 4096 UTF-8 bytes total. Keep the list short and important terms first. Terms are sent to Doubao with each recording; hints are not guaranteed corrections. Manual transcript edits are not learned automatically.
+
+**口语整理** (Speech cleanup) uses Doubao semantic smoothing to reduce fillers and repeated speech. It can also remove expressive hesitation or emphasis; it defaults to off on new installations. Both settings restart the idle speech service.

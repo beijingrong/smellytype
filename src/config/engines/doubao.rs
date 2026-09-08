@@ -10,6 +10,10 @@ pub struct DoubaoConfig {
     pub resource_id: String,
     /// Maximum wait after audio ends, including second-pass recognition.
     pub final_timeout_secs: u64,
+    /// One vocabulary hint per line; sent to Doubao with each recording.
+    pub hotwords: String,
+    /// Remove spoken disfluencies using the provider's semantic smoothing.
+    pub enable_ddc: bool,
 }
 
 impl Default for DoubaoConfig {
@@ -18,6 +22,8 @@ impl Default for DoubaoConfig {
             api_key: None,
             resource_id: "volc.seedasr.sauc.duration".into(),
             final_timeout_secs: 60,
+            hotwords: String::new(),
+            enable_ddc: false,
         }
     }
 }
@@ -28,6 +34,8 @@ impl std::fmt::Debug for DoubaoConfig {
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("resource_id", &self.resource_id)
             .field("final_timeout_secs", &self.final_timeout_secs)
+            .field("enable_ddc", &self.enable_ddc)
+            .field("hotwords", &"[REDACTED]")
             .finish()
     }
 }
