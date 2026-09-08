@@ -21,7 +21,7 @@ Give your Agent this prompt:
 
 You need an Omarchy / Hyprland environment with Quickshell, an internet connection, and a Volcengine API key with Doubao streaming speech recognition enabled. Enter the key locally; do not share it in chat or commit it to the repository.
 
-The current release is **0.1.2 preview**, installed by building from source. See the [installation guide](docs/INSTALL.md) for dependencies, installation, updates and migration. You do not need to install Voxtype separately or download a local speech model.
+The current release is **0.1.3 preview**, installed by building from source. See the [installation guide](docs/INSTALL.md) for dependencies, installation, updates and migration. You do not need to install Voxtype separately or download a local speech model.
 
 The installer includes the control panel. Existing SmellyType users can also install and update the plugin separately through [SmellyType for Omarchy](https://github.com/beijingrong/omarchy-smellytype). Click the cat button in the status bar or open **SmellyType Configuration** to access the panel.
 

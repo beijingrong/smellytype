@@ -7,7 +7,7 @@ An Omarchy Quattro bar plugin for [SmellyType](https://github.com/beijingrong/sm
 ## Requirements
 
 - Omarchy's Quickshell-based Shell (Quattro plugin API), Python 3.11+.
-- SmellyType 0.1.2 or newer, installed and configured with an active user service.
+- SmellyType 0.1.3 or newer, installed and configured with an active user service.
 - For key replacement: `xdg-terminal-exec` and a configured terminal.
 
 **This plugin is the desktop control panel, not the speech engine.** If SmellyType is missing, the panel shows installation guidance. Give your Agent https://github.com/beijingrong/smellytype and ask it to follow `AGENTS.md`. Its installer builds the core and includes this panel, so you do not need to install both copies.
@@ -29,6 +29,10 @@ python3 install.py
 ```
 
 This explicitly installs or updates **SmellyType Configuration** in the user applications directory, backs up existing managed files/bar layout, and enables the widget beside audio. It does not edit package-owned files or restart the speech service. The native `omarchy plugin add` command does not automatically execute this helper.
+
+## Startup fix for existing installations
+
+Core versions through 0.1.2 enabled the speech service under `default.target`, which could launch its Quickshell overlay before the display environment was available and cause a startup abort. Core 0.1.3 starts with `graphical-session.target`. Existing users must also apply the [service startup migration](https://github.com/beijingrong/smellytype/blob/main/docs/INSTALL.md#graphical-session-startup-fix-013); updating this panel alone does not change the core service.
 
 ## Use and configure
 

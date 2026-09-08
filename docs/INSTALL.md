@@ -113,3 +113,30 @@ The default wtype path remains available.
 The panel edits `[doubao] hotwords` (a newline-separated TOML string) and `enable_ddc` (boolean, default false). Empty vocabulary disables hints. Keep personal words in the user's config, never in the public repository. Defaults do not prepopulate personal terms. Client limits are 50 unique terms, 64 characters per term and 4096 UTF-8 bytes. The provider may impose additional context limits; place important terms first.
 
 Official protocol: https://docs.volcengine.com/docs/6561/2630027 — `request.enable_ddc` and JSON-string `request.corpus.context` containing `hotwords`. Existing second-pass recognition remains enabled. These features use the existing ASR request, not a separate text-generation service.
+
+## Graphical-session startup fix (0.1.3)
+
+Core versions through 0.1.2 enabled `smellytype.service` under `default.target`.
+At login this could start before the desktop imported `WAYLAND_DISPLAY` into
+systemd, causing the Quickshell recording overlay to abort during Qt startup.
+Its retries inherited the same missing environment. Fresh installations now
+use `WantedBy=graphical-session.target`, retaining `After=` and `PartOf=` for
+that target. The equivalent service change has been verified after reboot on
+the maintainer's Omarchy desktop.
+
+Existing installations need a one-time service migration in addition to staging
+updated binaries. From an updated source checkout, run:
+
+```sh
+python3 scripts/fix_service_startup.py
+```
+
+This backs up the service and its managed override, adds a graphical-session
+drop-in, reloads systemd, and uses `reenable` for an enabled service to remove
+its old `default.target` link. Disabled services stay disabled. It preserves
+credentials, speech settings, migration.json, other overrides and running
+recording/recognition. It does not restart the service. The change takes effect
+at the next graphical login; reboot and test F9, the overlay and final insertion.
+If immediate recovery is needed, finish dictation and restart the service from
+a working graphical session after its display environment has been imported.
+Updating only the Omarchy panel does not apply this core service migration.

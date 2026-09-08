@@ -44,6 +44,8 @@ class MigrationTests(unittest.TestCase):
             with patch.object(subprocess,'run',side_effect=run), patch.object(sys,'argv',[str(SCRIPT),'--artifacts',str(artifacts),'--activate','--migrate-'+previous]):m.main()
             self.assertIn('EnvironmentFile='+str(m.CONFIG.with_name('doubao.env')),m.SERVICE.read_text())
             self.assertNotIn('EnvironmentFile="',m.SERVICE.read_text())
+            self.assertIn('WantedBy=graphical-session.target',m.SERVICE.read_text())
+            self.assertNotIn('WantedBy=default.target',m.SERVICE.read_text())
             self.assertIn('engine="doubao"',m.CONFIG.read_text())
             self.assertIn('max_duration_secs=300',m.CONFIG.read_text())
             self.assertEqual(m.CONFIG.with_name('doubao.env').stat().st_mode & 0o777,0o600)

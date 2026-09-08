@@ -117,7 +117,7 @@ def main():
             oldusage=HOME/'.local/state'/previous/'dictation-usage.json'
             if oldusage.exists():usage.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(oldusage,usage)
         SERVICE.parent.mkdir(parents=True,exist_ok=True)
-        SERVICE.write_text('[Unit]\nDescription=SmellyType cloud dictation\nAfter=graphical-session.target\nPartOf=graphical-session.target\n[Service]\nExecStart='+quoted(PREFIX/'bin/smellytype')+' daemon\nEnvironmentFile='+str(secret).replace('%','%%')+'\nEnvironment='+quoted('SMELLYTYPE_OSD_FRONTEND=quickshell')+'\nEnvironment='+quoted('SMELLYTYPE_OSD_QML_PATH='+str(PREFIX/'quickshell'))+'\nEnvironment='+quoted('PATH='+str(PREFIX/'bin')+':'+str(HOME/'.local/bin')+':/usr/local/bin:/usr/bin')+'\nRestart=on-failure\nRestartSec=2\n[Install]\nWantedBy=default.target\n')
+        SERVICE.write_text('[Unit]\nDescription=SmellyType cloud dictation\nAfter=graphical-session.target\nPartOf=graphical-session.target\n[Service]\nExecStart='+quoted(PREFIX/'bin/smellytype')+' daemon\nEnvironmentFile='+str(secret).replace('%','%%')+'\nEnvironment='+quoted('SMELLYTYPE_OSD_FRONTEND=quickshell')+'\nEnvironment='+quoted('SMELLYTYPE_OSD_QML_PATH='+str(PREFIX/'quickshell'))+'\nEnvironment='+quoted('PATH='+str(PREFIX/'bin')+':'+str(HOME/'.local/bin')+':/usr/local/bin:/usr/bin')+'\nRestart=on-failure\nRestartSec=2\n[Install]\nWantedBy=graphical-session.target\n')
         run('systemd-analyze','--user','verify',str(SERVICE))
         binary=PREFIX/'bin/smellytype'
         userbin=HOME/'.local/bin';userbin.mkdir(parents=True,exist_ok=True)
